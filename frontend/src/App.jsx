@@ -38,7 +38,7 @@ function App() {
         darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-gray-50 to-gray-100'
       }`}>
         <header className={`shadow-sm mb-8 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-          <div className="max-w-4xl mx-auto px-4 py-4">
+          <div className="max-w-6xl mx-auto px-4 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <button
@@ -81,7 +81,7 @@ function App() {
           </div>
         </header>
 
-        <main className="max-w-4xl mx-auto px-4 pb-12">
+        <main className="max-w-6xl mx-auto px-4 pb-12">
           <div className={`rounded-xl shadow-sm p-6 transition-colors ${
             darkMode ? 'bg-gray-800' : 'bg-white'
           }`}>
@@ -105,7 +105,7 @@ function App() {
         onDocsClick={() => setCurrentPage('docs')}
       />
 
-      <main className="max-w-4xl mx-auto px-4 pb-12">
+      <main className="max-w-6xl mx-auto px-4 pb-12">
         <div className={`rounded-xl shadow-sm p-6 transition-colors ${
           darkMode ? 'bg-gray-800' : 'bg-white'
         }`}>
@@ -119,10 +119,6 @@ function App() {
           {activeTab === 'ml-pipeline' && <MLPipeline darkMode={darkMode} />}
           {activeTab === 'calculator' && <Calculator darkMode={darkMode} />}
         </div>
-
-        <footer className={`mt-8 text-center text-sm ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-          Built for evidence fusion research
-        </footer>
       </main>
     </div>
   )

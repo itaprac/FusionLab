@@ -137,7 +137,7 @@ function Calculator({ darkMode }) {
           Add hypotheses (e.g., A, B, C) and assign mass values (0-1) for each source.
         </p>
 
-        <div className="space-y-4 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           {sources.map((source, idx) => (
             <SourceCard
               key={source.id}
