@@ -7,7 +7,9 @@ function SourceCard({
   onAddHypothesis,
   onRemoveHypothesis,
   onUpdateHypothesis,
-  darkMode
+  darkMode,
+  readOnly = false,
+  description
 }) {
   const totalMass = source.hypotheses.reduce((sum, h) => {
     const mass = parseFloat(h.mass) || 0
@@ -17,28 +19,32 @@ function SourceCard({
   const isOverLimit = totalMass > 1
 
   return (
-    <div className={`rounded-lg border p-5 ${
+    <div className={`rounded-xl border p-5 ${
       darkMode
-        ? 'bg-gray-700 border-gray-600'
+        ? 'bg-gray-900 border-gray-800'
         : 'bg-white border-gray-200 shadow-sm'
     }`}>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <span className={`text-xs font-semibold uppercase tracking-wide px-2 py-1 rounded ${
-            darkMode ? 'bg-gray-600 text-gray-300' : 'bg-gray-100 text-gray-600'
-          }`}>
+          <span className="chip">
             Source {index}
           </span>
-          <input
-            type="text"
-            value={source.name}
-            onChange={(e) => onUpdateName(e.target.value)}
-            className={`text-base font-medium bg-transparent border-b-2 border-transparent hover:border-gray-400 focus:border-blue-500 focus:outline-none px-1 py-0.5 ${
-              darkMode ? 'text-white' : 'text-gray-900'
-            }`}
-          />
+          {readOnly ? (
+            <div className={`text-base font-medium px-1 py-0.5 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              {source.name}
+            </div>
+          ) : (
+            <input
+              type="text"
+              value={source.name}
+              onChange={(e) => onUpdateName(e.target.value)}
+              className={`text-base font-medium bg-transparent border-b border-transparent hover:border-gray-400 focus:border-teal-500 px-1 py-0.5 ${
+                darkMode ? 'text-white' : 'text-gray-900'
+              }`}
+            />
+          )}
         </div>
-        {canRemove && (
+        {!readOnly && canRemove && (
           <button
             onClick={onRemove}
             className={`transition-colors ${
@@ -55,26 +61,31 @@ function SourceCard({
         )}
       </div>
 
+      {description && (
+        <div className={`text-sm mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+          {description}
+        </div>
+      )}
+
       <div className="space-y-2">
-        <div className={`flex gap-3 text-xs font-semibold uppercase tracking-wide px-1 ${
-          darkMode ? 'text-gray-400' : 'text-gray-600'
-        }`}>
-          <span className="flex-1">Hypothesis</span>
-          <span className="w-28">Mass</span>
-          <span className="w-6"></span>
+        <div
+          className={`grid grid-cols-[1fr,7rem,1.5rem] gap-3 text-xs font-semibold uppercase tracking-wide ${
+            darkMode ? 'text-gray-400' : 'text-gray-600'
+          }`}
+        >
+          <span className="pl-0.5">Hypothesis</span>
+          <span className="pl-0.5">Mass</span>
+          <span aria-hidden="true"></span>
         </div>
         {source.hypotheses.map((hypothesis, idx) => (
-          <div key={idx} className="flex gap-3 items-center">
+          <div key={idx} className="grid grid-cols-[1fr,7rem,1.5rem] gap-3 items-center">
             <input
               type="text"
               placeholder="e.g., A"
               value={hypothesis.name}
               onChange={(e) => onUpdateHypothesis(idx, { name: e.target.value })}
-              className={`flex-1 p-2.5 border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-medium ${
-                darkMode
-                  ? 'bg-gray-800 border-gray-500 text-white placeholder-gray-500'
-                  : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-400'
-              }`}
+              disabled={readOnly}
+              className="input"
             />
             <input
               type="number"
@@ -84,15 +95,12 @@ function SourceCard({
               step="0.1"
               min="0"
               max="1"
-              className={`w-28 p-2.5 border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-medium ${
-                darkMode
-                  ? 'bg-gray-800 border-gray-500 text-white placeholder-gray-500'
-                  : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-400'
-              }`}
+              disabled={readOnly}
+              className="input"
             />
             <button
               onClick={() => onRemoveHypothesis(idx)}
-              disabled={source.hypotheses.length <= 1}
+              disabled={readOnly || source.hypotheses.length <= 1}
               className={`w-6 disabled:opacity-0 disabled:cursor-default transition-colors text-xl leading-none font-bold ${
                 darkMode
                   ? 'text-gray-500 hover:text-red-400'
@@ -106,22 +114,26 @@ function SourceCard({
       </div>
 
       <div className={`mt-4 flex items-center justify-between pt-3 border-t ${
-        darkMode ? 'border-gray-600' : 'border-gray-200'
+        darkMode ? 'border-gray-800' : 'border-gray-200'
       }`}>
-        <button
-          onClick={onAddHypothesis}
-          className="text-blue-500 hover:text-blue-400 text-sm font-semibold flex items-center gap-1"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Add Hypothesis
-        </button>
+        {readOnly ? (
+          <div />
+        ) : (
+          <button
+            onClick={onAddHypothesis}
+            className="btn btn-ghost px-2 py-1 text-teal-600 hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Add Hypothesis
+          </button>
+        )}
         <div className={`text-sm font-semibold px-3 py-1 rounded-full ${
           isOverLimit
             ? 'bg-red-500/20 text-red-500'
             : darkMode
-              ? 'bg-gray-600 text-gray-200'
+              ? 'bg-gray-800 text-gray-200'
               : 'bg-gray-100 text-gray-700'
         }`}>
           Total: {totalMass.toFixed(2)}

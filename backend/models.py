@@ -1,5 +1,7 @@
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict, Any, Optional
+
+
 
 
 #REGUEST BODY{
@@ -38,3 +40,53 @@ class Methods(BaseModel):
 class GetMethodsResponse(BaseModel):
     methods: List[Methods]
 
+class DataSet(BaseModel):
+    id : str
+    name: str
+
+class GetDataSetsResponse(BaseModel):
+    datasets: List[DataSet]
+
+class Classifiers(BaseModel):
+    id: str
+    name: str
+
+class GetClassifiersResponse(BaseModel):
+    classifiers: List[Classifiers]
+
+class ClassifierConfig(BaseModel):
+    id: str
+    params: Dict[str, Any]
+
+
+class MLFusionRequest(BaseModel):
+    datasetId: str
+    models: List[str]  # Lista ID modeli, np. ['svm', 'knn']
+    fusionMethod: str
+
+class MLFusionResult(BaseModel):
+    kind: str  # 'model' | 'fusion'
+    model_id: Optional[str] = None
+    fusion_method: str
+    accuracy: float
+    conflict: Optional[float]  # None gdy fuzja 3+ modeli (konflikt kumulatywny)
+
+class MLFusionResponse(BaseModel):
+    results: List[MLFusionResult]
+
+
+# Calculator Examples
+class ExampleSource(BaseModel):
+    name: str
+    masses: Dict[str, float]
+
+
+class Example(BaseModel):
+    id: str
+    name: str
+    description: str
+    sources: List[ExampleSource]
+
+
+class GetExamplesResponse(BaseModel):
+    examples: List[Example]

@@ -8,13 +8,3 @@ wheels/
 
 # Virtual environments
 .venv
-
-# Node
-node_modules/
-
-# IDE
-.vscode/
-
-
-# Mac OS
-.DS_Store

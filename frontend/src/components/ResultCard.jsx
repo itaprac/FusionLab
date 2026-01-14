@@ -1,17 +1,36 @@
-function ResultCard({ result, method, darkMode }) {
-  const sortedMasses = Object.entries(result.masses).sort((a, b) => b[1] - a[1])
+function ResultCard({ result, methodId, methodName, darkMode, displayOrder }) {
+  const sortedMasses = (() => {
+    const entries = Object.entries(result?.masses || {})
+
+    if (!Array.isArray(displayOrder) || displayOrder.length === 0) {
+      return entries.sort((a, b) => b[1] - a[1])
+    }
+
+    const byKey = new Map(entries)
+    const ordered = []
+    for (const key of displayOrder) {
+      if (byKey.has(key)) ordered.push([key, byKey.get(key)])
+    }
+
+    const used = new Set(ordered.map(([k]) => k))
+    const rest = entries
+      .filter(([k]) => !used.has(k))
+      .sort((a, b) => b[1] - a[1])
+
+    return [...ordered, ...rest]
+  })()
 
   return (
-    <div className={`rounded-lg border p-6 ${
+    <div className={`rounded-xl border p-6 ${
       darkMode
-        ? 'bg-gray-700 border-gray-600'
+        ? 'bg-gray-900 border-gray-800'
         : 'bg-white border-gray-200 shadow-sm'
     }`}>
       <div className="flex items-center gap-2 mb-4">
         <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-          darkMode ? 'bg-gray-600' : 'bg-gray-100'
+          darkMode ? 'bg-gray-800' : 'bg-gray-100'
         }`}>
-          <svg className={`w-5 h-5 ${darkMode ? 'text-blue-400' : 'text-blue-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className={`w-5 h-5 ${darkMode ? 'text-teal-400' : 'text-teal-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
         </div>
@@ -22,23 +41,23 @@ function ResultCard({ result, method, darkMode }) {
 
       <div className="space-y-3 mb-6">
         {sortedMasses.map(([hypothesis, mass], idx) => (
-          <div key={hypothesis} className="flex items-center gap-4">
-            <span className={`font-semibold w-16 ${
+          <div key={hypothesis} className="flex items-start gap-4">
+            <span className={`font-semibold w-44 leading-snug break-words ${
               darkMode ? 'text-gray-300' : 'text-gray-700'
             }`}>
               {hypothesis}
             </span>
-            <div className={`flex-1 rounded-full h-8 overflow-hidden ${
-              darkMode ? 'bg-gray-800' : 'bg-gray-100 shadow-inner'
+            <div className={`flex-1 rounded-full h-4 overflow-hidden mt-1 ${
+              darkMode ? 'bg-gray-800' : 'bg-gray-100'
             }`}>
               <div
                 className={`h-full rounded-full transition-all duration-500 ${
-                  darkMode ? 'bg-blue-500' : 'bg-blue-400'
+                  darkMode ? 'bg-teal-500' : 'bg-teal-500'
                 }`}
                 style={{ width: `${mass * 100}%` }}
               />
             </div>
-            <span className={`font-medium w-20 text-right ${
+            <span className={`font-medium w-16 text-right mt-0.5 ${
               darkMode ? 'text-gray-400' : 'text-gray-600'
             }`}>
               {(mass * 100).toFixed(1)}%
@@ -48,22 +67,22 @@ function ResultCard({ result, method, darkMode }) {
       </div>
 
       <div className={`pt-4 border-t flex items-center justify-between ${
-        darkMode ? 'border-gray-600' : 'border-gray-200'
+        darkMode ? 'border-gray-800' : 'border-gray-200'
       }`}>
         <div>
           <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Method: </span>
           <span className={`text-sm font-medium ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>
-            {method === 'dempster' ? 'Dempster-Shafer' : 'PCR5'}
+            {methodName || (methodId === 'dempster' ? 'Dempster-Shafer' : methodId === 'pcr5' ? 'PCR5' : '—')}
           </span>
         </div>
         <div className="text-right">
           <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Conflict: </span>
           <span className={`text-sm font-medium ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>
-            {result.conflict !== null ? `${(result.conflict * 100).toFixed(1)}%` : 'N/A'}
+            {result.conflict !== null ? `${Number(result.conflict).toFixed(2)}` : 'N/A'}
           </span>
           {result.conflict === null && (
             <p className={`text-xs mt-0.5 ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-              {method === 'pcr5' ? 'PCR5 redistributes conflict' : 'Multiple sources'}
+              {methodId === 'pcr5' ? 'PCR5 redistributes conflict' : 'Multiple sources'}
             </p>
           )}
         </div>

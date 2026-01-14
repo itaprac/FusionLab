@@ -3,7 +3,7 @@ import MethodSelector from './MethodSelector'
 import SourceCard from './SourceCard'
 import ResultCard from './ResultCard'
 
-function Calculator({ darkMode }) {
+function Calculator({ darkMode, preset, onPresetApplied }) {
   const [methods, setMethods] = useState([])
   const [selectedMethod, setSelectedMethod] = useState('')
   const [sources, setSources] = useState([
@@ -11,10 +11,28 @@ function Calculator({ darkMode }) {
     { id: 2, name: 'Source 2', hypotheses: [{ name: '', mass: '' }] }
   ])
   const [result, setResult] = useState(null)
+  const [resultMeta, setResultMeta] = useState(null) // { id, name } captured at fusion time
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [examples, setExamples] = useState([])
+  const [selectedExample, setSelectedExample] = useState('')
+  const [exampleSelectionMode, setExampleSelectionMode] = useState('manual') // 'auto' | 'manual'
+
+  const getDefaultExampleId = (methodId) => {
+    if (methodId === 'dempster') return 'dst_low_conflict'
+    if (methodId === 'pcr5') return 'pcr5_high_conflict'
+    return ''
+  }
+
+  const getMethodForExampleId = (exampleId) => {
+    if (!exampleId) return ''
+    if (exampleId.startsWith('dst_')) return 'dempster'
+    if (exampleId.startsWith('pcr5_')) return 'pcr5'
+    return ''
+  }
 
   useEffect(() => {
+    // Fetch methods
     fetch('/api/methods')
       .then(res => res.json())
       .then(data => {
@@ -24,7 +42,76 @@ function Calculator({ darkMode }) {
         }
       })
       .catch(() => setError('Failed to load methods'))
+
+    // Fetch examples
+    fetch('/api/examples')
+      .then(res => res.json())
+      .then(data => {
+        setExamples(data.examples)
+      })
+      .catch(() => console.error('Failed to load examples'))
   }, [])
+
+  useEffect(() => {
+    if (!preset) return
+
+    const { exampleId, methodId } = preset
+
+    if (methodId && methods.some(m => m.id === methodId)) {
+      setSelectedMethod(methodId)
+    }
+
+    if (exampleId && examples.some(e => e.id === exampleId)) {
+      setExampleSelectionMode('manual')
+      loadExample(exampleId)
+      if (typeof onPresetApplied === 'function') onPresetApplied()
+    }
+  }, [preset, examples, methods])
+
+  useEffect(() => {
+    if (exampleSelectionMode !== 'auto') return
+    if (!selectedMethod) return
+    if (!examples || examples.length === 0) return
+
+    const defaultExampleId = getDefaultExampleId(selectedMethod)
+    if (!defaultExampleId) return
+    if (!examples.some(e => e.id === defaultExampleId)) return
+    if (selectedExample === defaultExampleId) return
+
+    loadExample(defaultExampleId)
+  }, [exampleSelectionMode, selectedMethod, examples])
+
+  const loadExample = (exampleId) => {
+    if (!exampleId) {
+      setSelectedExample('')
+      return
+    }
+
+    const example = examples.find(e => e.id === exampleId)
+    if (!example) return
+
+    const inferredMethod = getMethodForExampleId(exampleId)
+    if (inferredMethod && methods.some(m => m.id === inferredMethod)) {
+      setSelectedMethod(inferredMethod)
+    }
+
+    setSelectedExample(exampleId)
+    setResult(null)
+    setResultMeta(null)
+    setError(null)
+
+    // Convert example sources to calculator format
+    const newSources = example.sources.map((src, idx) => ({
+      id: idx + 1,
+      name: src.name,
+      hypotheses: Object.entries(src.masses).map(([name, mass]) => ({
+        name,
+        mass: mass.toString()
+      }))
+    }))
+
+    setSources(newSources)
+  }
 
   const addSource = () => {
     const newId = Math.max(...sources.map(s => s.id)) + 1
@@ -76,7 +163,11 @@ function Calculator({ darkMode }) {
   const calculate = async () => {
     setError(null)
     setResult(null)
+    setResultMeta(null)
     setLoading(true)
+
+    const selectedMethodMeta = methods.find(m => m.id === selectedMethod)
+    const selectedMethodName = selectedMethodMeta?.name
 
     const requestSources = sources.map(s => ({
       name: s.name,
@@ -104,6 +195,7 @@ function Calculator({ darkMode }) {
       }
 
       setResult(data.result)
+      setResultMeta({ id: selectedMethod, name: selectedMethodName })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -113,11 +205,54 @@ function Calculator({ darkMode }) {
 
   return (
     <div>
+      {/* Load Example */}
+      {examples.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-center gap-2 mb-3">
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold ${
+              darkMode ? 'bg-purple-900/40 text-purple-300' : 'bg-purple-100 text-purple-700'
+            }`}>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+            </div>
+            <h3 className={`text-sm font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Load Example (Optional)</h3>
+          </div>
+          <select
+            value={selectedExample}
+            onChange={(e) => {
+              const value = e.target.value
+              if (!value) {
+                setExampleSelectionMode('auto')
+                setSelectedExample('')
+                return
+              }
+              setExampleSelectionMode('manual')
+              loadExample(value)
+            }}
+            className={`w-full md:w-auto min-w-[300px] px-4 py-2.5 rounded-xl border text-sm transition-colors ${
+              darkMode
+                ? 'bg-gray-900 border-gray-700 text-gray-100 focus:border-purple-500'
+                : 'bg-white border-gray-200 text-gray-800 focus:border-purple-500'
+            } focus:outline-none focus:ring-2 focus:ring-purple-500/20`}
+          >
+            <option value="">-- Select an example to load --</option>
+            {examples.map(example => (
+              <option key={example.id} value={example.id}>
+                {example.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Method Selection */}
       <div className="mb-8">
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-semibold">1</div>
-          <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-800'}`}>Select Fusion Method</h3>
+          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold ${
+            darkMode ? 'bg-teal-900/40 text-teal-300' : 'bg-teal-100 text-teal-700'
+          }`}>1</div>
+          <h3 className={`text-sm font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Select Fusion Method</h3>
         </div>
         <MethodSelector
           methods={methods}
@@ -130,8 +265,10 @@ function Calculator({ darkMode }) {
       {/* Sources */}
       <div className="mb-8">
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-semibold">2</div>
-          <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-800'}`}>Define Sources & Belief Masses</h3>
+          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold ${
+            darkMode ? 'bg-teal-900/40 text-teal-300' : 'bg-teal-100 text-teal-700'
+          }`}>2</div>
+          <h3 className={`text-sm font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Define Sources & Belief Masses</h3>
         </div>
         <p className={`text-sm mb-4 ml-8 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
           Add hypotheses (e.g., A, B, C) and assign mass values (0-1) for each source.
@@ -156,10 +293,10 @@ function Calculator({ darkMode }) {
 
         <button
           onClick={addSource}
-          className={`w-full border-2 border-dashed font-medium py-3 px-4 rounded-lg transition-colors ${
+          className={`w-full rounded-xl border border-dashed px-4 py-3 text-sm font-medium transition-colors ${
             darkMode
-              ? 'border-gray-600 hover:border-blue-500 hover:bg-blue-900/20 text-gray-400 hover:text-blue-400'
-              : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-500 hover:text-blue-600'
+              ? 'border-gray-700 hover:border-teal-700/70 hover:bg-teal-900/10 text-gray-300'
+              : 'border-gray-300 hover:border-teal-400 hover:bg-teal-50 text-gray-700'
           }`}
         >
           + Add Another Source
@@ -169,13 +306,15 @@ function Calculator({ darkMode }) {
       {/* Calculate */}
       <div className="mb-8">
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-semibold">3</div>
-          <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-800'}`}>Calculate Fusion</h3>
+          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold ${
+            darkMode ? 'bg-teal-900/40 text-teal-300' : 'bg-teal-100 text-teal-700'
+          }`}>3</div>
+          <h3 className={`text-sm font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Calculate Fusion</h3>
         </div>
         <button
           onClick={calculate}
           disabled={loading}
-          className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-blue-400 disabled:to-indigo-400 text-white font-medium py-4 px-4 rounded-lg transition-all shadow-md hover:shadow-lg"
+          className="btn btn-primary w-full py-3.5 text-base shadow-sm hover:shadow"
         >
           {loading ? 'Calculating...' : 'Calculate Fusion'}
         </button>
@@ -196,7 +335,14 @@ function Calculator({ darkMode }) {
         </div>
       )}
 
-      {result && <ResultCard result={result} method={selectedMethod} darkMode={darkMode} />}
+      {result && (
+        <ResultCard
+          result={result}
+          methodId={resultMeta?.id}
+          methodName={resultMeta?.name}
+          darkMode={darkMode}
+        />
+      )}
     </div>
   )
 }
