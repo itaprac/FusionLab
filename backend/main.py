@@ -18,12 +18,24 @@ from sklearn.preprocessing import LabelEncoder
 from scipy.sparse import issparse
 
 #Importowanie datasetów
-from sklearn.datasets import load_breast_cancer, load_wine, load_iris, load_digits, make_classification
+from sklearn.datasets import (
+    load_breast_cancer,
+    load_wine,
+    load_iris,
+    load_digits,
+    make_classification,
+    make_moons,
+    make_circles,
+    make_blobs,
+)
 #Importowanie modeli
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
-from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier, ExtraTreesClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neural_network import MLPClassifier
 
 from models import Methods, GetMethodsResponse, FusionRequest, FusionResponse, FusionResult, DataSet, GetDataSetsResponse, Classifiers, GetClassifiersResponse, ClassifierConfig, MLFusionRequest, MLFusionResponse, MLFusionResult, Example, ExampleSource, GetExamplesResponse
 
@@ -251,7 +263,11 @@ DATASETS = [
     DataSet(id="wine", name="Wine"),
     DataSet(id="iris", name="Iris"),
     DataSet(id="digits", name="Digits (8x8 images)"),
-    DataSet(id="high_dim", name="High Dimensional (Synthetic)")
+    DataSet(id="high_dim", name="High Dimensional (Synthetic)"),
+    DataSet(id="two_moons", name="Two Moons (Synthetic)"),
+    DataSet(id="two_circles", name="Two Circles (Synthetic)"),
+    DataSet(id="blobs_3c", name="Blobs - 3 Classes (Synthetic)"),
+    DataSet(id="imbalanced_3c", name="Imbalanced - 3 Classes (Synthetic)"),
 ]
 
 
@@ -271,7 +287,11 @@ CLASSIFIERS = [
     Classifiers(id="knn", name="K-Nearest Neighbors (KNN)"),
     Classifiers(id="naive_bayes", name="Naive Bayes"),
     Classifiers(id="rf", name="Random Forest"),
-    Classifiers(id="gradient_boosting", name="Gradient Boosting")
+    Classifiers(id="gradient_boosting", name="Gradient Boosting"),
+    Classifiers(id="logistic_regression", name="Logistic Regression"),
+    Classifiers(id="decision_tree", name="Decision Tree"),
+    Classifiers(id="extra_trees", name="Extra Trees"),
+    Classifiers(id="mlp", name="MLP Neural Network"),
 ]
 
 @app.get("/ml/models", response_model=GetClassifiersResponse)
@@ -311,13 +331,40 @@ def load_dataset(dataset_id: str):
             random_state=42,
         )
         return X, y
+    if dataset_id == "two_moons":
+        return make_moons(n_samples=1200, noise=0.25, random_state=42)
+    if dataset_id == "two_circles":
+        return make_circles(n_samples=1200, noise=0.08, factor=0.45, random_state=42)
+    if dataset_id == "blobs_3c":
+        return make_blobs(
+            n_samples=1500,
+            centers=3,
+            n_features=6,
+            cluster_std=[1.5, 2.0, 1.0],
+            random_state=42,
+        )
+    if dataset_id == "imbalanced_3c":
+        X, y = make_classification(
+            n_samples=2500,
+            n_features=20,
+            n_informative=10,
+            n_redundant=4,
+            n_repeated=0,
+            n_classes=3,
+            n_clusters_per_class=2,
+            weights=[0.70, 0.20, 0.10],
+            class_sep=1.0,
+            flip_y=0.02,
+            random_state=42,
+        )
+        return X, y
     raise HTTPException(status_code=400, detail="Unknown dataset")
 
 def build_classifier(model_id: str):
     """Tworzy model z domyślnymi parametrami na podstawie ID.
 
     Args:
-        model_id: ID modelu ('svm', 'knn', 'naive_bayes', 'gradient_boosting', 'rf')
+        model_id: ID modelu
 
     Returns:
         Gotowy model (Pipeline lub classifier)
@@ -344,6 +391,24 @@ def build_classifier(model_id: str):
         return Pipeline([
             ("scaler", StandardScaler()),
             ("clf", RandomForestClassifier(n_estimators=100, random_state=42))
+        ])
+
+    if model_id == "logistic_regression":
+        return Pipeline([
+            ("scaler", StandardScaler()),
+            ("clf", LogisticRegression(max_iter=2000, random_state=42))
+        ])
+
+    if model_id == "decision_tree":
+        return DecisionTreeClassifier(random_state=42)
+
+    if model_id == "extra_trees":
+        return ExtraTreesClassifier(n_estimators=200, random_state=42)
+
+    if model_id == "mlp":
+        return Pipeline([
+            ("scaler", StandardScaler()),
+            ("clf", MLPClassifier(hidden_layer_sizes=(64, 32), max_iter=400, random_state=42))
         ])
 
     raise HTTPException(status_code=400, detail=f"Unknown classifier: {model_id}")
