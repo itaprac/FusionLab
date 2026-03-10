@@ -1,20 +1,26 @@
-from encodings.punycode import digits
-from fastapi import FastAPI
-from fastapi import HTTPException
+import csv
+import io
+import json
+import os
+from uuid import uuid4
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
 from pybelief import dempster
-from typing import Union
+from typing import Any, Union
 from pybelief.core.belief_mass import BeliefMass
 from pybelief.fusion.dempster import combine_multiple as dempster_fusion
 from pybelief.fusion.pcr import combine_multiple as pcr5_fusion
 from typing import List
 
+from sklearn.base import clone
+from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import FunctionTransformer, LabelEncoder, OneHotEncoder
 from scipy.sparse import issparse
 
 #Importowanie datasetów
@@ -37,7 +43,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neural_network import MLPClassifier
 
-from models import Methods, GetMethodsResponse, FusionRequest, FusionResponse, FusionResult, DataSet, GetDataSetsResponse, Classifiers, GetClassifiersResponse, ClassifierConfig, MLFusionRequest, MLFusionResponse, MLFusionResult, Example, ExampleSource, GetExamplesResponse
+from models import Methods, GetMethodsResponse, FusionRequest, FusionResponse, FusionResult, DataSet, GetDataSetsResponse, DatasetPreviewColumn, DatasetPreviewResponse, UploadDatasetResponse, Classifiers, GetClassifiersResponse, ClassifierConfig, MLFusionRequest, MLFusionResponse, MLFusionResult, Example, ExampleSource, GetExamplesResponse
 
 #Funkcje dostepne w API
 METHODS = [
@@ -258,7 +264,7 @@ def fuse_beliefs(request: FusionRequest) -> FusionResponse:
 
 #---------------Pobranie dostępnych datasetów-----------------
 
-DATASETS = [
+BUILTIN_DATASETS = [
     DataSet(id="breast_cancer", name="Breast Cancer"),
     DataSet(id="wine", name="Wine"),
     DataSet(id="iris", name="Iris"),
@@ -270,6 +276,163 @@ DATASETS = [
     DataSet(id="imbalanced_3c", name="Imbalanced - 3 Classes (Synthetic)"),
 ]
 
+TARGET_COLUMN_ALIASES = {"target", "label", "class", "species"}
+
+
+def read_uploaded_csv(content: bytes) -> tuple[List[str], List[dict[str, str]]]:
+    try:
+        decoded = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="CSV must be encoded as UTF-8.") from exc
+
+    reader = csv.DictReader(io.StringIO(decoded))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV must contain a header row.")
+
+    fieldnames = [name.strip() for name in reader.fieldnames if name is not None]
+    if not fieldnames:
+        raise HTTPException(status_code=400, detail="CSV header row is empty.")
+    reader.fieldnames = fieldnames
+
+    rows: list[dict[str, str]] = []
+
+    for row_index, row in enumerate(reader, start=2):
+        if row is None or None in row:
+            raise HTTPException(status_code=400, detail=f"Malformed CSV row at line {row_index}.")
+
+        normalized_row = {
+            column: (value.strip() if value is not None else "")
+            for column, value in row.items()
+            if column is not None
+        }
+
+        if all(value == "" for value in normalized_row.values()):
+            continue
+
+        rows.append(normalized_row)
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="CSV must contain at least one data row.")
+
+    return fieldnames, rows
+
+
+def infer_column_kind(values: List[str]) -> str:
+    non_empty_values = [value for value in values if value != ""]
+    if not non_empty_values:
+        return "categorical"
+
+    try:
+        for value in non_empty_values:
+            float(value)
+    except ValueError:
+        return "categorical"
+
+    return "numeric"
+
+
+def get_default_target_column(fieldnames: List[str]) -> str:
+    normalized = {name.strip().lower(): name for name in fieldnames}
+    for alias in TARGET_COLUMN_ALIASES:
+        if alias in normalized:
+            return normalized[alias]
+    return fieldnames[-1]
+
+
+def build_dataset_preview(fieldnames: List[str], rows: List[dict[str, str]]) -> DatasetPreviewResponse:
+    columns = []
+    for column in fieldnames:
+        values = [row[column] for row in rows]
+        columns.append(
+            DatasetPreviewColumn(
+                name=column,
+                kind=infer_column_kind(values),
+                uniqueValues=len(set(values)),
+            )
+        )
+
+    return DatasetPreviewResponse(
+        columns=columns,
+        sampleRows=rows[:5],
+        totalRows=len(rows),
+        suggestedTargetColumn=get_default_target_column(fieldnames),
+    )
+
+
+def normalize_feature_columns(fieldnames: List[str], target_column: str, feature_columns: List[str] | None) -> List[str]:
+    if target_column not in fieldnames:
+        raise HTTPException(status_code=400, detail=f"Target column '{target_column}' does not exist in CSV.")
+
+    if feature_columns is None:
+        selected_columns = [column for column in fieldnames if column != target_column]
+    else:
+        selected_columns = []
+        for column in feature_columns:
+            if column not in fieldnames:
+                raise HTTPException(status_code=400, detail=f"Feature column '{column}' does not exist in CSV.")
+            if column == target_column:
+                raise HTTPException(status_code=400, detail="Target column cannot also be used as a feature.")
+            if column not in selected_columns:
+                selected_columns.append(column)
+
+    if not selected_columns:
+        raise HTTPException(status_code=400, detail="Select at least one feature column.")
+
+    return selected_columns
+
+
+def prepare_uploaded_dataset(
+    file_name: str,
+    content: bytes,
+    requested_target_column: str | None = None,
+    requested_feature_columns: List[str] | None = None,
+) -> tuple[DataSet, dict[str, Any], int, int, List[str]]:
+    fieldnames, rows = read_uploaded_csv(content)
+    target_column = requested_target_column or get_default_target_column(fieldnames)
+    feature_columns = normalize_feature_columns(fieldnames, target_column, requested_feature_columns)
+
+    feature_types: dict[str, str] = {}
+    for column in feature_columns:
+        values = [row[column] for row in rows]
+        if any(value == "" for value in values):
+            raise HTTPException(status_code=400, detail=f"Column '{column}' contains empty values.")
+        feature_types[column] = infer_column_kind(values)
+
+    target_values = [row[target_column] for row in rows]
+    if any(value == "" for value in target_values):
+        raise HTTPException(status_code=400, detail=f"Target column '{target_column}' contains empty values.")
+
+    classes = sorted(set(target_values))
+    if len(classes) < 2:
+        raise HTTPException(status_code=400, detail="Dataset must contain at least 2 classes.")
+
+    dataset_id = f"custom_{uuid4().hex[:8]}"
+    base_name = os.path.splitext(file_name or "Custom Dataset")[0].replace("_", " ").strip() or "Custom Dataset"
+    dataset = DataSet(id=dataset_id, name=f"{base_name} (Uploaded)")
+
+    return dataset, {
+        "dataset": dataset,
+        "rows": rows,
+        "feature_columns": feature_columns,
+        "target_column": target_column,
+        "feature_types": feature_types,
+    }, len(rows), len(feature_columns), classes
+
+
+def parse_feature_columns_form(feature_columns: str | None) -> List[str] | None:
+    if not feature_columns:
+        return None
+
+    try:
+        decoded_feature_columns = json.loads(feature_columns)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="feature_columns must be a JSON array.") from exc
+
+    if not isinstance(decoded_feature_columns, list) or not all(isinstance(column, str) for column in decoded_feature_columns):
+        raise HTTPException(status_code=400, detail="feature_columns must be a JSON array of column names.")
+
+    return decoded_feature_columns
+
 
 @app.get("/ml/datasets", response_model=GetDataSetsResponse)
 def get_datasets() -> GetDataSetsResponse:
@@ -278,7 +441,49 @@ def get_datasets() -> GetDataSetsResponse:
     Returns:
         GetDataSetsResponse: A list of supported datasets with descriptions.
     """
-    return GetDataSetsResponse(datasets=DATASETS)
+    return GetDataSetsResponse(datasets=BUILTIN_DATASETS)
+
+
+@app.post("/ml/datasets/preview", response_model=DatasetPreviewResponse)
+async def preview_dataset(file: UploadFile = File(...)) -> DatasetPreviewResponse:
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a .csv file.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    fieldnames, rows = read_uploaded_csv(content)
+    return build_dataset_preview(fieldnames, rows)
+
+
+@app.post("/ml/datasets/upload", response_model=UploadDatasetResponse)
+async def upload_dataset(
+    file: UploadFile = File(...),
+    target_column: str | None = Form(None),
+    feature_columns: str | None = Form(None),
+) -> UploadDatasetResponse:
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a .csv file.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    parsed_feature_columns = parse_feature_columns_form(feature_columns)
+    dataset, dataset_entry, rows, features, classes = prepare_uploaded_dataset(
+        file.filename,
+        content,
+        requested_target_column=target_column.strip() if target_column else None,
+        requested_feature_columns=parsed_feature_columns,
+    )
+
+    return UploadDatasetResponse(
+        dataset=dataset,
+        rows=rows,
+        features=features,
+        classes=classes,
+    )
 
 
 #---------------Pobranie dostępnych modeli-----------------
@@ -309,13 +514,17 @@ def get_classifiers() -> GetClassifiersResponse:
 #Ładowanie datasetów, gdzie return_X_y=True zwraca X i y jako numpy array
 def load_dataset(dataset_id: str):
     if dataset_id == "breast_cancer":
-        return load_breast_cancer(return_X_y=True)
+        X, y = load_breast_cancer(return_X_y=True)
+        return {"kind": "array", "X": X, "y": y}
     if dataset_id == "wine":
-        return load_wine(return_X_y=True)
+        X, y = load_wine(return_X_y=True)
+        return {"kind": "array", "X": X, "y": y}
     if dataset_id == "iris":
-        return load_iris(return_X_y=True)
+        X, y = load_iris(return_X_y=True)
+        return {"kind": "array", "X": X, "y": y}
     if dataset_id == "digits":
-        return load_digits(return_X_y=True)
+        X, y = load_digits(return_X_y=True)
+        return {"kind": "array", "X": X, "y": y}
     if dataset_id == "high_dim":
         # Synthetic high-dimensional classification dataset (reproducible)
         X, y = make_classification(
@@ -330,19 +539,22 @@ def load_dataset(dataset_id: str):
             flip_y=0.01,
             random_state=42,
         )
-        return X, y
+        return {"kind": "array", "X": X, "y": y}
     if dataset_id == "two_moons":
-        return make_moons(n_samples=1200, noise=0.25, random_state=42)
+        X, y = make_moons(n_samples=1200, noise=0.25, random_state=42)
+        return {"kind": "array", "X": X, "y": y}
     if dataset_id == "two_circles":
-        return make_circles(n_samples=1200, noise=0.08, factor=0.45, random_state=42)
+        X, y = make_circles(n_samples=1200, noise=0.08, factor=0.45, random_state=42)
+        return {"kind": "array", "X": X, "y": y}
     if dataset_id == "blobs_3c":
-        return make_blobs(
+        X, y = make_blobs(
             n_samples=1500,
             centers=3,
             n_features=6,
             cluster_std=[1.5, 2.0, 1.0],
             random_state=42,
         )
+        return {"kind": "array", "X": X, "y": y}
     if dataset_id == "imbalanced_3c":
         X, y = make_classification(
             n_samples=2500,
@@ -357,8 +569,43 @@ def load_dataset(dataset_id: str):
             flip_y=0.02,
             random_state=42,
         )
-        return X, y
+        return {"kind": "array", "X": X, "y": y}
     raise HTTPException(status_code=400, detail="Unknown dataset")
+
+
+def build_uploaded_feature_matrix(rows: List[dict[str, str]], feature_columns: List[str], feature_types: dict[str, str]) -> np.ndarray:
+    matrix = []
+    for row in rows:
+        matrix.append([
+            float(row[column]) if feature_types[column] == "numeric" else row[column]
+            for column in feature_columns
+        ])
+    return np.asarray(matrix, dtype=object)
+
+
+def build_uploaded_preprocessor(feature_columns: List[str], feature_types: dict[str, str]) -> ColumnTransformer:
+    numeric_indices = [index for index, column in enumerate(feature_columns) if feature_types[column] == "numeric"]
+    categorical_indices = [index for index, column in enumerate(feature_columns) if feature_types[column] != "numeric"]
+
+    transformers = []
+    if numeric_indices:
+        transformers.append(
+            (
+                "numeric",
+                FunctionTransformer(lambda values: np.asarray(values, dtype=float)),
+                numeric_indices,
+            )
+        )
+    if categorical_indices:
+        transformers.append(
+            (
+                "categorical",
+                OneHotEncoder(handle_unknown="ignore", sparse_output=False),
+                categorical_indices,
+            )
+        )
+
+    return ColumnTransformer(transformers=transformers, sparse_threshold=0)
 
 def build_classifier(model_id: str):
     """Tworzy model z domyślnymi parametrami na podstawie ID.
@@ -413,12 +660,122 @@ def build_classifier(model_id: str):
 
     raise HTTPException(status_code=400, detail=f"Unknown classifier: {model_id}")
 
+
+def build_training_model(model_id: str, preprocessor: ColumnTransformer | None = None):
+    model = build_classifier(model_id)
+    if preprocessor is None:
+        return model
+
+    return Pipeline([
+        ("preprocessor", clone(preprocessor)),
+        ("model", model),
+    ])
+
 def proba_to_bba(proba: np.ndarray, class_labels: List[str]) -> BeliefMass:
     masses = {}
     for i, label in enumerate(class_labels):
         masses[frozenset([label])] = float(proba[i])
 
     return BeliefMass(masses).normalize() #NIE JESTEM pewna co do normalize(), czy nie usunąć!-------
+
+
+def execute_ml_fusion(
+    X: np.ndarray,
+    y: np.ndarray,
+    model_ids: List[str],
+    fusion_method: str,
+    preprocessor: ColumnTransformer | None = None,
+) -> MLFusionResponse:
+    if issparse(X):
+        X = X.toarray()
+
+    y = np.asarray(y)
+
+    le = LabelEncoder()
+    y_encoded = le.fit_transform(y)
+    class_labels = [str(index) for index in range(len(le.classes_))]
+    label_lookup = {label: index for index, label in enumerate(class_labels)}
+
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y_encoded, test_size=0.25, random_state=42, stratify=y_encoded
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Dataset cannot be split for training: {str(exc)}") from exc
+
+    bbas_per_sample: List[List[BeliefMass]] = []
+
+    classifiers = []
+    for model_id in model_ids:
+        model = build_training_model(model_id, preprocessor)
+        try:
+            model.fit(X_train, y_train)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Model '{model_id}' could not be trained: {str(exc)}") from exc
+        classifiers.append(model)
+
+    per_model_results = []
+    for model_id, model in zip(model_ids, classifiers):
+        y_pred_model = model.predict(X_test)
+        model_acc = float(np.mean(np.array(y_pred_model) == y_test))
+        per_model_results.append(
+            MLFusionResult(
+                kind="model",
+                model_id=model_id,
+                fusion_method=fusion_method,
+                accuracy=model_acc,
+                conflict=None
+            )
+        )
+
+    for i in range(len(X_test)):
+        sample_bbas = []
+
+        for model in classifiers:
+            proba = model.predict_proba(X_test[i].reshape(1, -1))[0]
+            bba = proba_to_bba(proba, class_labels)
+            sample_bbas.append(bba)
+
+        bbas_per_sample.append(sample_bbas)
+
+    y_pred = []
+    total_conflict = 0.0
+
+    for idx, sample_bbas in enumerate(bbas_per_sample):
+        try:
+            if fusion_method == "dempster":
+                fused, conflict = dempster_fusion(sample_bbas)
+            elif fusion_method == "pcr5":
+                fused, conflict = pcr5_fusion(sample_bbas)
+            else:
+                raise HTTPException(status_code=400, detail="Unknown fusion method")
+
+            if conflict is not None:
+                total_conflict += conflict
+
+            best_label = max(fused.items(), key=lambda x: x[1])[0]
+            predicted_label = next(iter(best_label))
+            if predicted_label not in label_lookup:
+                raise HTTPException(status_code=500, detail=f"Unknown fused label '{predicted_label}'.")
+            y_pred.append(label_lookup[predicted_label])
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Fusion error at sample {idx} with {len(sample_bbas)} models: {str(e)}"
+            )
+
+    accuracy = float(np.mean(np.array(y_pred) == y_test))
+    avg_conflict = (total_conflict / len(X_test)) if total_conflict > 0 and len(X_test) > 0 else None
+
+    fused_result = MLFusionResult(
+        kind="fusion",
+        model_id=None,
+        fusion_method=fusion_method,
+        accuracy=accuracy,
+        conflict=avg_conflict
+    )
+
+    return MLFusionResponse(results=[*per_model_results, fused_result])
 
 @app.post("/ml/run", response_model=MLFusionResponse)
 def fuse_ml(request: MLFusionRequest):
@@ -431,101 +788,54 @@ def fuse_ml(request: MLFusionRequest):
       "fusionMethod": "dempster"
     }
     """
-    # Ładowanie danych
-    X, y = load_dataset(request.datasetId)
-
-# Jeśli w przyszłości będzie możliwość łądowania X którą jest macierzą rzadką to trzeba to obsłużyć
-# if issparse(X):
-#   X = X.toarray()
-# Na wypadek gdy y nie jest w formacie numpy array, u nas return_X_y=True zwraca numpy array
-#   y = np.asarray(y)
-
-# Kouje etykiedy do liczb całkowitych jeśli są w innej formie, aktualnie u nas wszystkie dataset'y mają y jako liczby całkowite
-#   le = LabelEncoder()
-#   y_encoded = le.fit_transform(y)
-
-    # Lista unikalnych etykiet klas jako stringi np. y = [0,1,1,2,2,0] => ["0","1","2"]
-    class_labels = [str(c) for c in np.unique(y)]
-
-    # Podział na zbiór treningowy i testowy
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.25, random_state=42, stratify=y
+    dataset_bundle = load_dataset(request.datasetId)
+    return execute_ml_fusion(
+        dataset_bundle["X"],
+        dataset_bundle["y"],
+        request.models,
+        request.fusionMethod,
     )
 
-    # Przechowywanie BBA dla każdego testowego przykładu
-    bbas_per_sample: List[List[BeliefMass]] = []
 
-    # 1. Trenowanie modeli z listy ID
-    classifiers = []
-    for model_id in request.models:
-        model = build_classifier(model_id)
-        model.fit(X_train, y_train)
-        classifiers.append(model)
+@app.post("/ml/run-upload", response_model=MLFusionResponse)
+async def fuse_uploaded_ml(
+    file: UploadFile = File(...),
+    target_column: str = Form(...),
+    feature_columns: str = Form(...),
+    models: str = Form(...),
+    fusion_method: str = Form(...),
+):
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a .csv file.")
 
-    # 1b. Accuracy dla każdego modelu osobno
-    per_model_results = []
-    for model_id, model in zip(request.models, classifiers):
-        y_pred_model = model.predict(X_test)
-        model_acc = float(np.mean(np.array(y_pred_model) == y_test))
-        per_model_results.append(
-            MLFusionResult(
-                kind="model",
-                model_id=model_id,
-                fusion_method=request.fusionMethod,
-                accuracy=model_acc,
-                conflict=None
-            )
-        )
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    # 2. Build BBA per test sample
-    for i in range(len(X_test)):
-        sample_bbas = []
+    parsed_feature_columns = parse_feature_columns_form(feature_columns)
+    try:
+        model_ids = json.loads(models)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="models must be a JSON array.") from exc
+    if not isinstance(model_ids, list) or not all(isinstance(model_id, str) for model_id in model_ids):
+        raise HTTPException(status_code=400, detail="models must be a JSON array of model IDs.")
 
-        for model in classifiers:
-            proba = model.predict_proba(X_test[i].reshape(1, -1))[0]
-            bba = proba_to_bba(proba, class_labels)
-            sample_bbas.append(bba)
-
-        bbas_per_sample.append(sample_bbas)
-
-    # 3. Fuse per sample + predict class
-    y_pred = []
-    total_conflict = 0.0
-
-    for idx, sample_bbas in enumerate(bbas_per_sample):
-        try:
-            if request.fusionMethod == "dempster":
-                fused, conflict = dempster_fusion(sample_bbas)
-            elif request.fusionMethod == "pcr5":
-                fused, conflict = pcr5_fusion(sample_bbas)
-            else:
-                raise HTTPException(status_code=400, detail="Unknown fusion method")
-
-            # conflict może być None przy 3+ modelach
-            if conflict is not None:
-                total_conflict += conflict
-
-            # decision = max belief
-            best_label = max(fused.items(), key=lambda x: x[1])[0]
-            y_pred.append(int(list(best_label)[0]))
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Fusion error at sample {idx} with {len(sample_bbas)} models: {str(e)}"
-            )
-
-    # 4. Accuracy
-    accuracy = float(np.mean(np.array(y_pred) == y_test))
-    # Avg conflict - dla 3+ modeli wysyłamy None (konflikt kumulatywny, nie pojedyncza wartość)
-    avg_conflict = (total_conflict / len(X_test)) if total_conflict > 0 and len(X_test) > 0 else None
-
-    # 5. Przygotowanie odpowiedzi
-    fused_result = MLFusionResult(
-        kind="fusion",
-        model_id=None,
-        fusion_method=request.fusionMethod,
-        accuracy=accuracy,
-        conflict=avg_conflict
+    _, dataset_entry, _, _, _ = prepare_uploaded_dataset(
+        file.filename,
+        content,
+        requested_target_column=target_column.strip(),
+        requested_feature_columns=parsed_feature_columns,
     )
 
-    return MLFusionResponse(results=[*per_model_results, fused_result])
+    X = build_uploaded_feature_matrix(
+        dataset_entry["rows"],
+        dataset_entry["feature_columns"],
+        dataset_entry["feature_types"],
+    )
+    y = np.asarray([row[dataset_entry["target_column"]] for row in dataset_entry["rows"]], dtype=object)
+    preprocessor = build_uploaded_preprocessor(
+        dataset_entry["feature_columns"],
+        dataset_entry["feature_types"],
+    )
+
+    return execute_ml_fusion(X, y, model_ids, fusion_method, preprocessor)

@@ -47,6 +47,23 @@ class DataSet(BaseModel):
 class GetDataSetsResponse(BaseModel):
     datasets: List[DataSet]
 
+class DatasetPreviewColumn(BaseModel):
+    name: str
+    kind: str
+    uniqueValues: int
+
+class DatasetPreviewResponse(BaseModel):
+    columns: List[DatasetPreviewColumn]
+    sampleRows: List[Dict[str, str]]
+    totalRows: int
+    suggestedTargetColumn: str
+
+class UploadDatasetResponse(BaseModel):
+    dataset: DataSet
+    rows: int
+    features: int
+    classes: List[str]
+
 class Classifiers(BaseModel):
     id: str
     name: str

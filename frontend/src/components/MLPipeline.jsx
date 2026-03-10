@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 function MLPipeline({ darkMode }) {
   const [datasets, setDatasets] = useState([])
@@ -12,37 +12,83 @@ function MLPipeline({ darkMode }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [results, setResults] = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState(null)
+  const [uploadSummary, setUploadSummary] = useState(null)
+  const [selectedFileName, setSelectedFileName] = useState('')
+  const [pendingFile, setPendingFile] = useState(null)
+  const [datasetPreview, setDatasetPreview] = useState(null)
+  const [selectedTargetColumn, setSelectedTargetColumn] = useState('')
+  const [selectedFeatureColumns, setSelectedFeatureColumns] = useState([])
+  const [customDataset, setCustomDataset] = useState(null)
+
+  const fileInputRef = useRef(null)
+  const visibleDatasets = customDataset ? [...datasets, customDataset.dataset] : datasets
+
+  const loadDatasets = async (preferredDatasetId = null) => {
+    const response = await fetch('/api/ml/datasets')
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.detail || 'Failed to load datasets')
+    }
+
+    setDatasets(data.datasets)
+    setSelectedDataset(currentSelection => {
+      if (preferredDatasetId && data.datasets.some(dataset => dataset.id === preferredDatasetId)) {
+        return preferredDatasetId
+      }
+
+      if (preferredDatasetId && customDataset?.dataset.id === preferredDatasetId) {
+        return preferredDatasetId
+      }
+
+      if (currentSelection && data.datasets.some(dataset => dataset.id === currentSelection)) {
+        return currentSelection
+      }
+
+      if (currentSelection && customDataset?.dataset.id === currentSelection) {
+        return currentSelection
+      }
+
+      return data.datasets[0]?.id || ''
+    })
+  }
 
   useEffect(() => {
-    // Fetch datasets
-    fetch('/api/ml/datasets')
-      .then(res => res.json())
-      .then(data => {
-        setDatasets(data.datasets)
-        if (data.datasets.length > 0) {
-          setSelectedDataset(data.datasets[0].id)
-        }
-      })
-      .catch(() => setError('Failed to load datasets'))
+    loadDatasets().catch(err => setError(err.message))
 
     // Fetch models
     fetch('/api/ml/models')
-      .then(res => res.json())
+      .then(async res => {
+        const data = await res.json()
+        if (!res.ok) {
+          throw new Error(data.detail || 'Failed to load models')
+        }
+        return data
+      })
       .then(data => {
         setModels(data.classifiers)
       })
-      .catch(() => setError('Failed to load models'))
+      .catch(err => setError(err.message))
 
     // Fetch fusion methods
     fetch('/api/methods')
-      .then(res => res.json())
+      .then(async res => {
+        const data = await res.json()
+        if (!res.ok) {
+          throw new Error(data.detail || 'Failed to load methods')
+        }
+        return data
+      })
       .then(data => {
         setMethods(data.methods)
         if (data.methods.length > 0) {
           setSelectedMethod(data.methods[0].id)
         }
       })
-      .catch(() => setError('Failed to load methods'))
+      .catch(err => setError(err.message))
   }, [])
 
   const toggleModel = (modelId) => {
@@ -51,6 +97,122 @@ function MLPipeline({ darkMode }) {
         ? prev.filter(id => id !== modelId)
         : [...prev, modelId]
     )
+  }
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) {
+      return
+    }
+
+    setPendingFile(file)
+    setSelectedFileName(file.name)
+    setPreviewLoading(true)
+    setUploadError(null)
+    setUploadSummary(null)
+    setDatasetPreview(null)
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const response = await fetch('/api/ml/datasets/preview', {
+        method: 'POST',
+        body: formData
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.detail || 'Dataset upload failed')
+      }
+
+      const defaultFeatureColumns = data.columns
+        .map(column => column.name)
+        .filter(columnName => columnName !== data.suggestedTargetColumn)
+
+      setDatasetPreview(data)
+      setSelectedTargetColumn(data.suggestedTargetColumn)
+      setSelectedFeatureColumns(defaultFeatureColumns)
+    } catch (err) {
+      setUploadError(err.message)
+      setPendingFile(null)
+    } finally {
+      setPreviewLoading(false)
+      event.target.value = ''
+    }
+  }
+
+  const handleTargetChange = (event) => {
+    const nextTarget = event.target.value
+    setSelectedTargetColumn(nextTarget)
+    setSelectedFeatureColumns(
+      (datasetPreview?.columns || [])
+        .map(column => column.name)
+        .filter(columnName => columnName !== nextTarget)
+    )
+  }
+
+  const toggleFeatureColumn = (columnName) => {
+    setSelectedFeatureColumns(prev =>
+      prev.includes(columnName)
+        ? prev.filter(name => name !== columnName)
+        : [...prev, columnName]
+    )
+  }
+
+  const importConfiguredDataset = async () => {
+    if (!pendingFile || !datasetPreview) {
+      setUploadError('Choose a CSV file first.')
+      return
+    }
+
+    if (!selectedTargetColumn) {
+      setUploadError('Select a target column before importing.')
+      return
+    }
+
+    if (selectedFeatureColumns.length === 0) {
+      setUploadError('Select at least one feature column.')
+      return
+    }
+
+    setUploading(true)
+    setUploadError(null)
+
+    const formData = new FormData()
+    formData.append('file', pendingFile)
+    formData.append('target_column', selectedTargetColumn)
+    formData.append('feature_columns', JSON.stringify(selectedFeatureColumns))
+
+    try {
+      const response = await fetch('/api/ml/datasets/upload', {
+        method: 'POST',
+        body: formData
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.detail || 'Dataset upload failed')
+      }
+
+      setUploadSummary(data)
+      setError(null)
+      setCustomDataset({
+        dataset: data.dataset,
+        file: pendingFile,
+        targetColumn: selectedTargetColumn,
+        featureColumns: selectedFeatureColumns
+      })
+      setSelectedDataset(data.dataset.id)
+    } catch (err) {
+      setUploadError(err.message)
+    } finally {
+      setUploading(false)
+    }
   }
 
   const runFusion = async () => {
@@ -64,15 +226,32 @@ function MLPipeline({ darkMode }) {
     setLoading(true)
 
     try {
-      const response = await fetch('/api/ml/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          datasetId: selectedDataset,
-          models: selectedModels,
-          fusionMethod: selectedMethod
+      const isCustomDataset = customDataset?.dataset.id === selectedDataset
+      let response
+
+      if (isCustomDataset) {
+        const formData = new FormData()
+        formData.append('file', customDataset.file)
+        formData.append('target_column', customDataset.targetColumn)
+        formData.append('feature_columns', JSON.stringify(customDataset.featureColumns))
+        formData.append('models', JSON.stringify(selectedModels))
+        formData.append('fusion_method', selectedMethod)
+
+        response = await fetch('/api/ml/run-upload', {
+          method: 'POST',
+          body: formData
         })
-      })
+      } else {
+        response = await fetch('/api/ml/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            datasetId: selectedDataset,
+            models: selectedModels,
+            fusionMethod: selectedMethod
+          })
+        })
+      }
 
       const data = await response.json()
 
@@ -99,8 +278,284 @@ function MLPipeline({ darkMode }) {
           <h3 className={`text-sm font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Select Dataset</h3>
         </div>
 
+        <div className={`mb-4 overflow-hidden rounded-2xl border ${
+          darkMode ? 'border-teal-900/70 bg-gradient-to-br from-teal-950/70 via-gray-950 to-gray-950' : 'border-teal-100 bg-gradient-to-br from-amber-50 via-white to-teal-50'
+        }`}>
+          <div className="p-5 md:p-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div className="max-w-2xl">
+                <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${
+                  darkMode ? 'text-teal-300/80' : 'text-teal-700/80'
+                }`}>
+                  Custom Dataset
+                </p>
+                <h4 className={`mt-2 text-lg font-semibold ${
+                  darkMode ? 'text-white' : 'text-gray-900'
+                }`}>
+                  Upload your own CSV and run the same fusion pipeline
+                </h4>
+                <p className={`mt-2 text-sm leading-6 ${
+                  darkMode ? 'text-gray-300' : 'text-gray-600'
+                }`}>
+                  Format: UTF-8 CSV, comma-separated, header row required. After upload you can choose which column is the target and which columns should be used as features. Numeric and categorical feature columns are both supported.
+                </p>
+              </div>
+
+              <div className="flex w-full flex-col gap-3 md:w-auto md:min-w-72">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <button
+                  type="button"
+                  onClick={handleUploadClick}
+                  disabled={previewLoading || uploading}
+                  className={`rounded-2xl px-4 py-3 text-left transition-all ${
+                    previewLoading || uploading
+                      ? darkMode
+                        ? 'cursor-not-allowed bg-gray-800 text-gray-500'
+                        : 'cursor-not-allowed bg-gray-100 text-gray-400'
+                      : darkMode
+                        ? 'bg-teal-400 text-gray-950 shadow-[0_18px_40px_rgba(45,212,191,0.18)] hover:-translate-y-0.5'
+                        : 'bg-teal-600 text-white shadow-[0_18px_40px_rgba(13,148,136,0.24)] hover:-translate-y-0.5'
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">
+                    {previewLoading ? 'Inspecting columns...' : uploading ? 'Importing dataset...' : 'Choose CSV file'}
+                  </span>
+                  <span className={`mt-1 block text-xs ${
+                    previewLoading || uploading
+                      ? darkMode ? 'text-gray-500' : 'text-gray-400'
+                      : darkMode ? 'text-gray-900/70' : 'text-white/75'
+                  }`}>
+                    {selectedFileName || 'Try the Iris CSV linked in the plan.'}
+                  </span>
+                </button>
+
+                <div className={`rounded-2xl border px-4 py-3 text-sm ${
+                  darkMode ? 'border-white/10 bg-white/5 text-gray-300' : 'border-white/70 bg-white/80 text-gray-600'
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Session storage</span>
+                    <span className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] ${
+                      darkMode ? 'bg-teal-400/10 text-teal-300' : 'bg-teal-100 text-teal-700'
+                    }`}>
+                      temporary
+                    </span>
+                  </div>
+                  <p className={`mt-2 text-xs leading-5 ${
+                    darkMode ? 'text-gray-400' : 'text-gray-500'
+                  }`}>
+                    Uploaded datasets stay only in this page session and disappear after refresh.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {uploadError && (
+              <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
+                darkMode
+                  ? 'border-red-900/70 bg-red-950/50 text-red-300'
+                  : 'border-red-200 bg-red-50 text-red-700'
+              }`}>
+                {uploadError}
+              </div>
+            )}
+
+            {datasetPreview && (
+              <div className={`mt-4 rounded-2xl border p-4 md:p-5 ${
+                darkMode ? 'border-white/10 bg-white/5' : 'border-white/70 bg-white/85'
+              }`}>
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h5 className={`text-base font-semibold ${
+                        darkMode ? 'text-white' : 'text-gray-900'
+                      }`}>
+                        Column mapping
+                      </h5>
+                      <span className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
+                        darkMode ? 'bg-teal-400/10 text-teal-300' : 'bg-teal-100 text-teal-700'
+                      }`}>
+                        {datasetPreview.totalRows} rows detected
+                      </span>
+                    </div>
+                    <p className={`mt-2 text-sm ${
+                      darkMode ? 'text-gray-400' : 'text-gray-500'
+                    }`}>
+                      Pick the target column, then leave the useful feature columns checked. Columns marked as categorical will be encoded automatically during training.
+                    </p>
+                  </div>
+
+                  <div className="w-full lg:w-64">
+                    <label className={`mb-2 block text-xs font-semibold uppercase tracking-[0.2em] ${
+                      darkMode ? 'text-teal-300/80' : 'text-teal-700/80'
+                    }`}>
+                      Target column
+                    </label>
+                    <select
+                      value={selectedTargetColumn}
+                      onChange={handleTargetChange}
+                      className={`w-full rounded-xl border px-3 py-2.5 text-sm ${
+                        darkMode
+                          ? 'border-gray-700 bg-gray-950 text-gray-100'
+                          : 'border-gray-200 bg-white text-gray-900'
+                      }`}
+                    >
+                      {datasetPreview.columns.map(column => (
+                        <option key={column.name} value={column.name}>
+                          {column.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {datasetPreview.columns.map(column => {
+                    const isTarget = column.name === selectedTargetColumn
+                    const isSelectedFeature = selectedFeatureColumns.includes(column.name)
+
+                    return (
+                      <button
+                        key={column.name}
+                        type="button"
+                        onClick={() => {
+                          if (!isTarget) {
+                            toggleFeatureColumn(column.name)
+                          }
+                        }}
+                        className={`rounded-2xl border p-4 text-left transition-colors ${
+                          isTarget
+                            ? darkMode
+                              ? 'border-amber-500/60 bg-amber-500/10'
+                              : 'border-amber-300 bg-amber-50'
+                            : isSelectedFeature
+                              ? darkMode
+                                ? 'border-teal-500/60 bg-teal-500/10'
+                                : 'border-teal-300 bg-teal-50'
+                              : darkMode
+                                ? 'border-gray-800 bg-gray-950 hover:border-gray-700'
+                                : 'border-gray-200 bg-white hover:border-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className={`font-medium ${
+                              darkMode ? 'text-gray-100' : 'text-gray-900'
+                            }`}>
+                              {column.name}
+                            </div>
+                            <p className={`mt-2 text-xs uppercase tracking-[0.2em] ${
+                              darkMode ? 'text-gray-500' : 'text-gray-400'
+                            }`}>
+                              {column.kind}
+                            </p>
+                          </div>
+                          <span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
+                            isTarget
+                              ? darkMode ? 'bg-amber-400/10 text-amber-300' : 'bg-amber-100 text-amber-700'
+                              : isSelectedFeature
+                                ? darkMode ? 'bg-teal-400/10 text-teal-300' : 'bg-teal-100 text-teal-700'
+                                : darkMode ? 'bg-gray-800 text-gray-400' : 'bg-gray-100 text-gray-500'
+                          }`}>
+                            {isTarget ? 'target' : isSelectedFeature ? 'feature' : 'ignored'}
+                          </span>
+                        </div>
+                        <p className={`mt-3 text-sm ${
+                          darkMode ? 'text-gray-400' : 'text-gray-500'
+                        }`}>
+                          {column.uniqueValues} unique values
+                        </p>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div className="mt-4 overflow-x-auto rounded-2xl border">
+                  <table className={`min-w-full text-sm ${
+                    darkMode ? 'border-gray-800 bg-gray-950' : 'border-gray-200 bg-white'
+                  }`}>
+                    <thead>
+                      <tr className={darkMode ? 'text-gray-300' : 'text-gray-700'}>
+                        {datasetPreview.columns.map(column => (
+                          <th key={column.name} className="border-b px-3 py-2 text-left font-semibold">
+                            {column.name}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {datasetPreview.sampleRows.map((row, rowIndex) => (
+                        <tr key={rowIndex} className={darkMode ? 'border-t border-gray-800' : 'border-t border-gray-200'}>
+                          {datasetPreview.columns.map(column => (
+                            <td key={`${rowIndex}-${column.name}`} className={`px-3 py-2 ${
+                              darkMode ? 'text-gray-300' : 'text-gray-600'
+                            }`}>
+                              {row[column.name]}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <p className={`text-sm ${
+                    darkMode ? 'text-gray-400' : 'text-gray-500'
+                  }`}>
+                    {selectedFeatureColumns.length} feature columns selected.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={importConfiguredDataset}
+                    disabled={uploading}
+                    className={`rounded-2xl px-4 py-3 text-sm font-semibold transition-all ${
+                      uploading
+                        ? darkMode
+                          ? 'cursor-not-allowed bg-gray-800 text-gray-500'
+                          : 'cursor-not-allowed bg-gray-100 text-gray-400'
+                        : darkMode
+                          ? 'bg-white text-gray-950 hover:-translate-y-0.5'
+                          : 'bg-gray-900 text-white hover:-translate-y-0.5'
+                    }`}
+                  >
+                    {uploading ? 'Importing...' : 'Import dataset with selected mapping'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {uploadSummary && (
+              <div className={`mt-4 rounded-xl border px-4 py-3 ${
+                darkMode
+                  ? 'border-teal-800/80 bg-teal-950/40 text-teal-100'
+                  : 'border-teal-200 bg-white/90 text-teal-900'
+              }`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold">{uploadSummary.dataset.name}</span>
+                  <span className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
+                    darkMode ? 'bg-teal-400/10 text-teal-300' : 'bg-teal-100 text-teal-700'
+                  }`}>
+                    Ready
+                  </span>
+                </div>
+                <p className={`mt-2 text-sm ${
+                  darkMode ? 'text-gray-300' : 'text-gray-600'
+                }`}>
+                  {uploadSummary.rows} rows, {uploadSummary.features} features, {uploadSummary.classes.length} classes.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {datasets.map(dataset => (
+          {visibleDatasets.map(dataset => (
             <button
               key={dataset.id}
               onClick={() => setSelectedDataset(dataset.id)}
@@ -129,6 +584,13 @@ function MLPipeline({ darkMode }) {
                 <div className={`font-medium ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>
                   {dataset.name}
                 </div>
+                {dataset.id.startsWith('custom_') && (
+                  <span className={`ml-auto rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
+                    darkMode ? 'bg-teal-400/10 text-teal-300' : 'bg-teal-100 text-teal-700'
+                  }`}>
+                    Uploaded
+                  </span>
+                )}
               </div>
             </button>
           ))}
@@ -299,7 +761,7 @@ function MLPipeline({ darkMode }) {
               Results
             </h3>
             <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              Dataset: {datasets.find(d => d.id === selectedDataset)?.name || selectedDataset} • Fusion: {methods.find(m => m.id === selectedMethod)?.name || selectedMethod}
+              Dataset: {visibleDatasets.find(d => d.id === selectedDataset)?.name || selectedDataset} • Fusion: {methods.find(m => m.id === selectedMethod)?.name || selectedMethod}
             </p>
           </div>
 
