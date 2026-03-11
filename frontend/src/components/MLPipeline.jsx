@@ -83,10 +83,12 @@ function MLPipeline({ darkMode }) {
         return data
       })
       .then(data => {
-        setMethods(data.methods)
-        if (data.methods.length > 0) {
-          setSelectedMethod(data.methods[0].id)
-        }
+          // PCR6 is currently only exposed in the Fusion Calculator (not ML Fusion)
+          const mlMethods = data.methods.filter(m => m.id !== 'pcr6')
+          setMethods(mlMethods)
+          if (mlMethods.length > 0) {
+            setSelectedMethod(mlMethods[0].id)
+          }
       })
       .catch(err => setError(err.message))
   }, [])

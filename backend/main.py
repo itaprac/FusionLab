@@ -12,7 +12,7 @@ from pybelief import dempster
 from typing import Any, Union
 from pybelief.core.belief_mass import BeliefMass
 from pybelief.fusion.dempster import combine_multiple as dempster_fusion
-from pybelief.fusion.pcr import combine_multiple as pcr5_fusion
+from pybelief.fusion.pcr import combine_multiple as pcr5_fusion, combine_multiple_pcr6 as pcr6_fusion
 from typing import List
 
 from sklearn.base import clone
@@ -56,6 +56,11 @@ METHODS = [
         id="pcr5",
         name="PCR5 (DSmT)",
         description="Proportional Conflict Redistribution (PCR5). Redistributes conflict instead of normalizing it, handling high-conflict evidence more robustly."
+    ),
+    Methods(
+        id="pcr6",
+        name="PCR6 (DSmT)",
+        description="Proportional Conflict Redistribution (PCR6). Redistributes conflict for 3+ sources proportionally to contributing masses."
     )
 ]
 
@@ -211,7 +216,8 @@ def fuse_beliefs(request: FusionRequest) -> FusionResponse:
 
     fusion_methods = {
         "dempster": dempster_fusion,
-        "pcr5": pcr5_fusion
+        "pcr5": pcr5_fusion,
+        "pcr6": pcr6_fusion
     }
 
     if request.fusion_method not in fusion_methods:
