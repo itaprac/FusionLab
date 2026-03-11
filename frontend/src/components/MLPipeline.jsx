@@ -25,6 +25,21 @@ function MLPipeline({ darkMode }) {
 
   const fileInputRef = useRef(null)
   const visibleDatasets = customDataset ? [...datasets, customDataset.dataset] : datasets
+  const formatPercentMetric = (value) => {
+    if (value === null || typeof value === 'undefined' || Number.isNaN(Number(value))) {
+      return '-'
+    }
+
+    return `${(Number(value) * 100).toFixed(2)}%`
+  }
+
+  const formatDecimalMetric = (value) => {
+    if (value === null || typeof value === 'undefined' || Number.isNaN(Number(value))) {
+      return '-'
+    }
+
+    return Number(value).toFixed(2)
+  }
 
   const loadDatasets = async (preferredDatasetId = null) => {
     const response = await fetch('/api/ml/datasets')
@@ -774,6 +789,10 @@ function MLPipeline({ darkMode }) {
                   <tr className={darkMode ? 'text-gray-300' : 'text-gray-700'}>
                     <th className="text-left font-semibold pb-2">Model</th>
                     <th className="text-left font-semibold pb-2">Accuracy</th>
+                    <th className="text-left font-semibold pb-2">Precision</th>
+                    <th className="text-left font-semibold pb-2">Recall</th>
+                    <th className="text-left font-semibold pb-2">F1</th>
+                    <th className="text-left font-semibold pb-2">ROC AUC</th>
                     <th className="text-left font-semibold pb-2">Conflict</th>
                   </tr>
                 </thead>
@@ -784,21 +803,35 @@ function MLPipeline({ darkMode }) {
                       ? `Fusion (${methods.find(m => m.id === r.fusion_method)?.name || r.fusion_method})`
                       : (models.find(m => m.id === r.model_id)?.name || r.model_id || 'Model')
 
-                    const accText = `${(r.accuracy * 100).toFixed(2)}%`
-                    const conflictText = r.conflict === null || typeof r.conflict === 'undefined'
-                      ? '-'
-                      : `${Number(r.conflict).toFixed(2)}`
+                    const accText = formatPercentMetric(r.accuracy)
+                    const precisionText = formatPercentMetric(r.precision)
+                    const recallText = formatPercentMetric(r.recall)
+                    const f1Text = formatPercentMetric(r.f1_score)
+                    const rocText = formatPercentMetric(r.roc_auc)
+                    const conflictText = formatDecimalMetric(r.conflict)
 
                     return (
                       <tr
                         key={`${r.kind}-${r.model_id ?? 'fusion'}-${idx}`}
-                        className={darkMode ? 'border-t border-gray-800' : 'border-t border-gray-200'}
+                        className={`${darkMode ? 'border-t border-gray-800' : 'border-t border-gray-200'} ${isFusion ? 'font-semibold' : ''}`}
                       >
                         <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'} ${isFusion ? 'font-semibold' : ''}`}>
                           {modelName}
                         </td>
                         <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
                           {accText}
+                        </td>
+                        <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
+                          {precisionText}
+                        </td>
+                        <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
+                          {recallText}
+                        </td>
+                        <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
+                          {f1Text}
+                        </td>
+                        <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
+                          {rocText}
                         </td>
                         <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
                           {conflictText}

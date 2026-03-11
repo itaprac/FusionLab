@@ -17,6 +17,13 @@ from typing import List
 
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
@@ -685,6 +692,37 @@ def proba_to_bba(proba: np.ndarray, class_labels: List[str]) -> BeliefMass:
     return BeliefMass(masses).normalize() #NIE JESTEM pewna co do normalize(), czy nie usunąć!-------
 
 
+def calculate_classification_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    y_score: np.ndarray | None = None,
+) -> dict[str, float | None]:
+    metrics: dict[str, float | None] = {
+        "accuracy": float(accuracy_score(y_true, y_pred)),
+        "precision": float(precision_score(y_true, y_pred, average="weighted", zero_division=0)),
+        "recall": float(recall_score(y_true, y_pred, average="macro", zero_division=0)),
+        "f1_score": float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
+        "roc_auc": None,
+    }
+
+    if y_score is None or len(np.unique(y_true)) < 2:
+        return metrics
+
+    try:
+        if y_score.ndim == 1:
+            metrics["roc_auc"] = float(roc_auc_score(y_true, y_score))
+        elif y_score.shape[1] == 2:
+            metrics["roc_auc"] = float(roc_auc_score(y_true, y_score[:, 1]))
+        else:
+            metrics["roc_auc"] = float(
+                roc_auc_score(y_true, y_score, multi_class="ovr", average="weighted")
+            )
+    except ValueError:
+        metrics["roc_auc"] = None
+
+    return metrics
+
+
 def execute_ml_fusion(
     X: np.ndarray,
     y: np.ndarray,
@@ -712,6 +750,7 @@ def execute_ml_fusion(
     bbas_per_sample: List[List[BeliefMass]] = []
 
     classifiers = []
+    model_probabilities: List[np.ndarray] = []
     for model_id in model_ids:
         model = build_training_model(model_id, preprocessor)
         try:
@@ -719,17 +758,22 @@ def execute_ml_fusion(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"Model '{model_id}' could not be trained: {str(exc)}") from exc
         classifiers.append(model)
+        model_probabilities.append(model.predict_proba(X_test))
 
     per_model_results = []
-    for model_id, model in zip(model_ids, classifiers):
+    for model_id, model, model_proba in zip(model_ids, classifiers, model_probabilities):
         y_pred_model = model.predict(X_test)
-        model_acc = float(np.mean(np.array(y_pred_model) == y_test))
+        model_metrics = calculate_classification_metrics(y_test, y_pred_model, model_proba)
         per_model_results.append(
             MLFusionResult(
                 kind="model",
                 model_id=model_id,
                 fusion_method=fusion_method,
-                accuracy=model_acc,
+                accuracy=model_metrics["accuracy"],
+                precision=model_metrics["precision"],
+                recall=model_metrics["recall"],
+                f1_score=model_metrics["f1_score"],
+                roc_auc=model_metrics["roc_auc"],
                 conflict=None
             )
         )
@@ -737,14 +781,15 @@ def execute_ml_fusion(
     for i in range(len(X_test)):
         sample_bbas = []
 
-        for model in classifiers:
-            proba = model.predict_proba(X_test[i].reshape(1, -1))[0]
+        for model_proba in model_probabilities:
+            proba = model_proba[i]
             bba = proba_to_bba(proba, class_labels)
             sample_bbas.append(bba)
 
         bbas_per_sample.append(sample_bbas)
 
     y_pred = []
+    fused_scores = []
     total_conflict = 0.0
 
     for idx, sample_bbas in enumerate(bbas_per_sample):
@@ -759,8 +804,18 @@ def execute_ml_fusion(
             if conflict is not None:
                 total_conflict += conflict
 
-            best_label = max(fused.items(), key=lambda x: x[1])[0]
-            predicted_label = next(iter(best_label))
+            singleton_scores = np.array(
+                [float(fused.get_mass(label)) for label in class_labels],
+                dtype=float,
+            )
+            fused_scores.append(singleton_scores)
+
+            if np.any(singleton_scores):
+                predicted_label = class_labels[int(np.argmax(singleton_scores))]
+            else:
+                best_label = max(fused.items(), key=lambda x: x[1])[0]
+                predicted_label = next(iter(best_label))
+
             if predicted_label not in label_lookup:
                 raise HTTPException(status_code=500, detail=f"Unknown fused label '{predicted_label}'.")
             y_pred.append(label_lookup[predicted_label])
@@ -770,14 +825,22 @@ def execute_ml_fusion(
                 detail=f"Fusion error at sample {idx} with {len(sample_bbas)} models: {str(e)}"
             )
 
-    accuracy = float(np.mean(np.array(y_pred) == y_test))
+    fused_metrics = calculate_classification_metrics(
+        y_test,
+        np.asarray(y_pred),
+        np.asarray(fused_scores) if fused_scores else None,
+    )
     avg_conflict = (total_conflict / len(X_test)) if total_conflict > 0 and len(X_test) > 0 else None
 
     fused_result = MLFusionResult(
         kind="fusion",
         model_id=None,
         fusion_method=fusion_method,
-        accuracy=accuracy,
+        accuracy=fused_metrics["accuracy"],
+        precision=fused_metrics["precision"],
+        recall=fused_metrics["recall"],
+        f1_score=fused_metrics["f1_score"],
+        roc_auc=fused_metrics["roc_auc"],
         conflict=avg_conflict
     )
 

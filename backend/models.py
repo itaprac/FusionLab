@@ -86,6 +86,10 @@ class MLFusionResult(BaseModel):
     model_id: Optional[str] = None
     fusion_method: str
     accuracy: float
+    precision: float
+    recall: float
+    f1_score: float
+    roc_auc: Optional[float] = None
     conflict: Optional[float]  # None gdy fuzja 3+ modeli (konflikt kumulatywny)
 
 class MLFusionResponse(BaseModel):
