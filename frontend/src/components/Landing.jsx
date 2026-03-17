@@ -1,41 +1,31 @@
-const capabilityPanels = [
+const modules = [
   {
     title: 'Fusion Calculator',
-    description: 'Enter belief masses, compare DST and PCR5, and inspect fused output with conflict.',
+    description: 'Enter belief masses manually, compare methods, and inspect the fused result.',
     action: 'Open calculator',
     target: 'calculator',
   },
   {
-    title: 'ML Fusion Pipeline',
-    description: 'Run a dataset-driven workflow that combines model outputs with evidence fusion.',
+    title: 'ML Fusion',
+    description: 'Use a dataset-driven workflow to combine model outputs with evidence fusion.',
     action: 'Open ML fusion',
     target: 'ml',
   },
   {
     title: 'Examples',
-    description: 'Use guided scenarios such as avalanche hazard assessment to present the workflow quickly.',
+    description: 'Start from a ready-made scenario to explain the app quickly and clearly.',
     action: 'Open examples',
     target: 'examples',
   },
 ]
 
-const whyFusionPoints = [
-  'It makes disagreement visible instead of hiding it.',
-  'It works well with uncertainty and incomplete evidence.',
-  'It lets you compare DST and PCR5 in one place.',
+const reasons = [
+  'Combine uncertain or conflicting sources in one place.',
+  'Compare DST and PCR5 without changing tools.',
+  'Use manual inputs, examples, or an ML workflow depending on the presentation.',
 ]
 
 function Landing({ darkMode, onOpenCalculator, onOpenMLPipeline, onOpenExamples }) {
-  const handleScrollToCapabilities = () => {
-    const prefersReducedMotion = typeof window !== 'undefined'
-      && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-
-    document.getElementById('platform-capabilities')?.scrollIntoView({
-      behavior: prefersReducedMotion ? 'auto' : 'smooth',
-      block: 'start',
-    })
-  }
-
   const handleTargetOpen = (target) => {
     if (target === 'calculator') onOpenCalculator()
     if (target === 'ml') onOpenMLPipeline()
@@ -43,142 +33,137 @@ function Landing({ darkMode, onOpenCalculator, onOpenMLPipeline, onOpenExamples 
   }
 
   return (
-    <div className="landing-shell py-4 sm:py-8 lg:py-10">
-      <section className="grid gap-8 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] lg:items-center">
+    <div className="py-6 sm:py-8">
+      <section className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-center">
         <div className="max-w-3xl">
-          <p className={`landing-eyebrow ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-            Fusion Lab · Evidence fusion workbench
+          <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+            Fusion Lab
           </p>
 
-          <h1 className={`display-title mt-4 max-w-4xl ${darkMode ? 'text-slate-50' : 'text-slate-900'}`}>
-            Turn uncertain evidence into clear, defensible outcomes.
-          </h1>
-
-          <p className={`mt-5 max-w-2xl text-base leading-7 sm:text-lg ${
-            darkMode ? 'text-slate-300' : 'text-slate-700'
+          <h2 className={`mt-3 text-3xl font-semibold tracking-tight sm:text-4xl ${
+            darkMode ? 'text-white' : 'text-gray-900'
           }`}>
-            Fusion Lab combines uncertain, incomplete, or conflicting evidence with
-            Dempster-Shafer and PCR5 methods, then lets you present the result through
-            examples, manual calculation, or an ML workflow.
+            A simple way to present evidence fusion.
+          </h2>
+
+          <p className={`mt-4 max-w-2xl text-base leading-7 sm:text-lg ${
+            darkMode ? 'text-gray-300' : 'text-gray-700'
+          }`}>
+            Fusion Lab shows how multiple uncertain sources can be combined into one fused
+            result using Dempster-Shafer Theory and PCR5. You can present it through manual
+            inputs, guided examples, or an ML-based workflow.
           </p>
 
-          <div className="mt-7 flex flex-wrap gap-2.5">
-            {['DST & PCR5', 'Interactive examples', 'ML workflow'].map((item) => (
-              <span key={item} className="editorial-tag">
-                {item}
-              </span>
-            ))}
-          </div>
-
-          <div className="mt-8 flex flex-col gap-3 md:flex-row md:flex-wrap">
-            <button type="button" className="btn btn-hero-primary" onClick={handleScrollToCapabilities}>
-              See capabilities
-            </button>
-            <button type="button" className="btn btn-hero-secondary" onClick={onOpenCalculator}>
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <button
+              type="button"
+              onClick={onOpenCalculator}
+              className="btn btn-primary min-h-[46px] rounded-xl px-4"
+            >
               Open Fusion Calculator
             </button>
-            <button type="button" className="btn btn-hero-secondary" onClick={onOpenMLPipeline}>
+            <button
+              type="button"
+              onClick={onOpenMLPipeline}
+              className={`btn min-h-[46px] rounded-xl border px-4 ${
+                darkMode
+                  ? 'border-gray-700 bg-gray-900 text-gray-100 hover:border-gray-600 hover:bg-gray-800'
+                  : 'border-gray-200 bg-white text-gray-800 hover:border-gray-300 hover:bg-gray-50'
+              }`}
+            >
               Open ML Fusion
+            </button>
+            <button
+              type="button"
+              onClick={onOpenExamples}
+              className={`btn min-h-[46px] rounded-xl border px-4 ${
+                darkMode
+                  ? 'border-gray-700 bg-gray-900 text-gray-100 hover:border-gray-600 hover:bg-gray-800'
+                  : 'border-gray-200 bg-white text-gray-800 hover:border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              Open Examples
             </button>
           </div>
         </div>
 
-        <div className={`fusion-figure ${darkMode ? 'fusion-figure-dark' : 'fusion-figure-light'}`} aria-hidden="true">
-          <div className="fusion-figure-labels">
+        <div className={`rounded-[28px] border p-6 sm:p-8 ${
+          darkMode ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'
+        }`}>
+          <div className={`mb-5 flex justify-between text-sm ${
+            darkMode ? 'text-gray-400' : 'text-gray-500'
+          }`}>
             <span>Source A</span>
             <span>Source B</span>
             <span>Source C</span>
           </div>
 
-          <div className="fusion-figure-stage">
-            <div className="fusion-source fusion-source-a">
-              <strong>Belief</strong>
+          <div className="landing-venn">
+            <div className={`landing-venn-circle landing-venn-a ${darkMode ? 'landing-venn-dark' : ''}`}>
+              <span>Belief</span>
             </div>
-            <div className="fusion-source fusion-source-b">
-              <strong>Signal</strong>
+            <div className={`landing-venn-circle landing-venn-b ${darkMode ? 'landing-venn-dark' : ''}`}>
+              <span>Signal</span>
             </div>
-            <div className="fusion-source fusion-source-c">
-              <strong>Expert</strong>
-            </div>
-
-            <div className="fusion-core">
-              <span className="fusion-core-method">DST / PCR5</span>
-              <span className="fusion-core-result">Fused result</span>
+            <div className={`landing-venn-circle landing-venn-c ${darkMode ? 'landing-venn-dark' : ''}`}>
+              <span>Expert</span>
             </div>
 
-            <svg viewBox="0 0 420 280" className="fusion-lines">
-              <path d="M90 92 C140 118, 170 128, 208 140" />
-              <path d="M328 92 C286 118, 250 128, 208 140" />
-              <path d="M150 230 C176 205, 190 176, 208 140" />
-            </svg>
+            <div className={`landing-venn-center ${darkMode ? 'landing-venn-dark' : ''}`}>
+              <strong>Fusion</strong>
+              <span>DST / PCR5</span>
+            </div>
           </div>
 
-          <p className={`fusion-caption ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-            One place to compare evidence, conflict, and fusion behavior.
+          <p className={`mt-4 text-base leading-7 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+            The overlap shows the main idea: different sources combine into a single fused result.
           </p>
         </div>
       </section>
 
-      <section id="platform-capabilities" className="editorial-section">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div className="max-w-2xl">
-            <p className="landing-eyebrow text-slate-500 dark:text-slate-400">Capabilities</p>
-            <h2 className={`editorial-heading mt-3 ${darkMode ? 'text-slate-50' : 'text-slate-900'}`}>
-              A shorter overview of what you can present.
-            </h2>
-          </div>
-          <button type="button" className="btn btn-hero-secondary w-fit" onClick={onOpenExamples}>
-            Open examples
-          </button>
-        </div>
-
-        <div className="mt-6 grid gap-4 lg:grid-cols-3">
-          {capabilityPanels.map((panel) => (
-            <article key={panel.title} className="editorial-panel editorial-panel-slate">
-              <h3 className={`text-xl font-semibold tracking-tight ${darkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                {panel.title}
-              </h3>
-              <p className={`mt-3 text-sm leading-7 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                {panel.description}
-              </p>
-              <button
-                type="button"
-                className="btn btn-card mt-6"
-                onClick={() => handleTargetOpen(panel.target)}
-              >
-                {panel.action}
-              </button>
-            </article>
-          ))}
-        </div>
+      <section className="mt-10 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {modules.map((module) => (
+          <article
+            key={module.title}
+            className={`rounded-2xl border p-5 ${
+              darkMode ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'
+            }`}
+          >
+            <h3 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              {module.title}
+            </h3>
+            <p className={`mt-2 text-sm leading-6 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              {module.description}
+            </p>
+            <button
+              type="button"
+              onClick={() => handleTargetOpen(module.target)}
+              className={`mt-4 inline-flex items-center rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
+                darkMode
+                  ? 'border-gray-700 text-gray-100 hover:border-gray-600 hover:bg-gray-800'
+                  : 'border-gray-200 text-gray-800 hover:border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              {module.action}
+            </button>
+          </article>
+        ))}
       </section>
 
-      <section className="editorial-section grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
-        <article className="editorial-panel editorial-panel-slate">
-          <p className="landing-eyebrow text-slate-500 dark:text-slate-400">Why fusion</p>
-          <h2 className={`editorial-heading mt-3 ${darkMode ? 'text-slate-50' : 'text-slate-900'}`}>
-            Why it matters
-          </h2>
-          <ul className={`mt-5 space-y-3 text-sm leading-7 sm:text-base ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-            {whyFusionPoints.map((point) => (
-              <li key={point} className="flex items-start gap-3">
-                <span className="mt-2 h-1.5 w-1.5 rounded-full bg-teal-600 dark:bg-teal-400" />
-                <span>{point}</span>
-              </li>
-            ))}
-          </ul>
-        </article>
-
-        <article className="editorial-panel editorial-panel-teal">
-          <p className="landing-eyebrow text-slate-500 dark:text-slate-400">Methods</p>
-          <h2 className={`editorial-heading mt-3 ${darkMode ? 'text-slate-50' : 'text-slate-900'}`}>
-            DST and PCR5, side by side.
-          </h2>
-          <div className={`mt-5 space-y-4 text-sm leading-7 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-            <p><strong className={darkMode ? 'text-slate-100' : 'text-slate-900'}>Dempster-Shafer:</strong> useful when evidence is fairly compatible.</p>
-            <p><strong className={darkMode ? 'text-slate-100' : 'text-slate-900'}>PCR5:</strong> useful when sources disagree more strongly.</p>
-          </div>
-        </article>
+      <section className={`mt-10 rounded-2xl border p-6 ${
+        darkMode ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'
+      }`}>
+        <h3 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+          Why use Fusion Lab
+        </h3>
+        <ul className={`mt-4 space-y-3 text-sm leading-6 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          {reasons.map((reason) => (
+            <li key={reason} className="flex items-start gap-3">
+              <span className={`mt-2 h-1.5 w-1.5 rounded-full ${darkMode ? 'bg-teal-400' : 'bg-teal-600'}`} />
+              <span>{reason}</span>
+            </li>
+          ))}
+        </ul>
       </section>
     </div>
   )
