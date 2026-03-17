@@ -20,9 +20,8 @@ const modules = [
 ]
 
 const reasons = [
-  'Combine uncertain or conflicting sources in one place.',
-  'Compare DST and PCR5 without changing tools.',
-  'Use manual inputs, examples, or an ML workflow depending on the presentation.',
+  'In many real situations, information does not come from one fully reliable source. Different inputs may support different conclusions or carry different levels of uncertainty.',
+  'Fusion Lab helps present how those sources can be combined into one clearer result, making it easier to explain both the process and the final outcome.',
 ]
 
 function Landing({ darkMode, onOpenCalculator, onOpenMLPipeline, onOpenExamples }) {
@@ -90,33 +89,22 @@ function Landing({ darkMode, onOpenCalculator, onOpenMLPipeline, onOpenExamples 
         <div className={`rounded-[28px] border p-6 sm:p-8 ${
           darkMode ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'
         }`}>
-          <div className={`mb-5 flex justify-between text-sm ${
-            darkMode ? 'text-gray-400' : 'text-gray-500'
-          }`}>
-            <span>Source A</span>
-            <span>Source B</span>
-            <span>Source C</span>
-          </div>
-
           <div className="landing-venn">
-            <div className={`landing-venn-circle landing-venn-a ${darkMode ? 'landing-venn-dark' : ''}`}>
-              <span>Belief</span>
+            <div className={`landing-venn-circle landing-venn-left ${darkMode ? 'landing-venn-dark' : ''}`}>
+              <span>Source 1</span>
             </div>
-            <div className={`landing-venn-circle landing-venn-b ${darkMode ? 'landing-venn-dark' : ''}`}>
-              <span>Signal</span>
-            </div>
-            <div className={`landing-venn-circle landing-venn-c ${darkMode ? 'landing-venn-dark' : ''}`}>
-              <span>Expert</span>
+            <div className={`landing-venn-circle landing-venn-right ${darkMode ? 'landing-venn-dark' : ''}`}>
+              <span>Source 2</span>
             </div>
 
             <div className={`landing-venn-center ${darkMode ? 'landing-venn-dark' : ''}`}>
               <strong>Fusion</strong>
-              <span>DST / PCR5</span>
+              <span>shared result</span>
             </div>
           </div>
 
           <p className={`mt-4 text-base leading-7 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-            The overlap shows the main idea: different sources combine into a single fused result.
+            The overlap shows the core idea: two sources meet in one fused result.
           </p>
         </div>
       </section>
@@ -154,16 +142,13 @@ function Landing({ darkMode, onOpenCalculator, onOpenMLPipeline, onOpenExamples 
         darkMode ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'
       }`}>
         <h3 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-          Why use Fusion Lab
+          Why use this?
         </h3>
-        <ul className={`mt-4 space-y-3 text-sm leading-6 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+        <div className={`mt-4 space-y-3 text-sm leading-7 sm:text-base ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
           {reasons.map((reason) => (
-            <li key={reason} className="flex items-start gap-3">
-              <span className={`mt-2 h-1.5 w-1.5 rounded-full ${darkMode ? 'bg-teal-400' : 'bg-teal-600'}`} />
-              <span>{reason}</span>
-            </li>
+            <p key={reason}>{reason}</p>
           ))}
-        </ul>
+        </div>
       </section>
     </div>
   )
