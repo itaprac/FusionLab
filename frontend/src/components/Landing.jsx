@@ -1,3 +1,5 @@
+import { useEffect } from 'react'
+
 const reasons = [
   {
     title: 'Explain fusion clearly',
@@ -64,6 +66,35 @@ function Landing({
   onOpenMLPipeline,
   onOpenExamples,
 }) {
+  useEffect(() => {
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const elements = Array.from(document.querySelectorAll('[data-reveal]'))
+
+    if (prefersReducedMotion) {
+      elements.forEach((element) => element.classList.add('is-visible'))
+      return undefined
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible')
+            observer.unobserve(entry.target)
+          }
+        })
+      },
+      {
+        threshold: 0.16,
+        rootMargin: '0px 0px -8% 0px',
+      }
+    )
+
+    elements.forEach((element) => observer.observe(element))
+
+    return () => observer.disconnect()
+  }, [])
+
   const handleTargetOpen = (target) => {
     if (target === 'calculator') onOpenCalculator()
     if (target === 'ml') onOpenMLPipeline()
@@ -72,7 +103,7 @@ function Landing({
 
   return (
     <div className="landing-page min-h-screen">
-      <header className={`border-b ${darkMode ? 'border-slate-800 bg-slate-950/95' : 'border-slate-200 bg-white/95'}`}>
+      <header className={`motion-intro motion-delay-1 border-b ${darkMode ? 'border-slate-800 bg-slate-950/95' : 'border-slate-200 bg-white/95'}`}>
         <div className="app-container flex items-center justify-between gap-4 py-5">
           <div>
             <div className={`text-lg font-semibold tracking-tight ${darkMode ? 'text-white' : 'text-slate-900'}`}>
@@ -119,17 +150,17 @@ function Landing({
       <main>
         <section className="app-container grid gap-10 py-12 sm:py-16 lg:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] lg:items-center">
           <div className="max-w-3xl">
-            <p className={`text-sm font-medium uppercase tracking-[0.18em] ${darkMode ? 'text-teal-300' : 'text-teal-700'}`}>
+            <p className={`motion-intro motion-delay-2 text-sm font-medium uppercase tracking-[0.18em] ${darkMode ? 'text-teal-300' : 'text-teal-700'}`}>
               Full landing page
             </p>
 
-            <h1 className={`mt-4 text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl ${
+            <h1 className={`motion-intro motion-delay-3 mt-4 text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl ${
               darkMode ? 'text-white' : 'text-slate-900'
             }`}>
               Present evidence fusion like a complete product.
             </h1>
 
-            <div className={`mt-6 max-w-2xl space-y-4 text-base leading-8 sm:text-lg ${
+            <div className={`motion-intro motion-delay-4 mt-6 max-w-2xl space-y-4 text-base leading-8 sm:text-lg ${
               darkMode ? 'text-slate-300' : 'text-slate-700'
             }`}>
               <p>
@@ -142,18 +173,18 @@ function Landing({
               </p>
             </div>
 
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <div className="motion-intro motion-delay-5 mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <button
                 type="button"
                 onClick={onOpenCalculator}
-                className="btn btn-primary min-h-[48px] rounded-xl px-5"
+                className="btn btn-primary min-h-[48px] rounded-xl px-5 transition-transform duration-300 hover:-translate-y-0.5"
               >
                 Open Fusion Calculator
               </button>
               <button
                 type="button"
                 onClick={onOpenExamples}
-                className={`btn min-h-[48px] rounded-xl border px-5 ${
+                className={`btn min-h-[48px] rounded-xl border px-5 transition-transform duration-300 hover:-translate-y-0.5 ${
                   darkMode
                     ? 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-600 hover:bg-slate-800'
                     : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50'
@@ -164,7 +195,7 @@ function Landing({
               <button
                 type="button"
                 onClick={onOpenMLPipeline}
-                className={`btn min-h-[48px] rounded-xl border px-5 ${
+                className={`btn min-h-[48px] rounded-xl border px-5 transition-transform duration-300 hover:-translate-y-0.5 ${
                   darkMode
                     ? 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-600 hover:bg-slate-800'
                     : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50'
@@ -175,7 +206,7 @@ function Landing({
             </div>
           </div>
 
-          <div className={`rounded-[2rem] border p-6 sm:p-7 ${
+          <div className={`motion-intro motion-delay-4 rounded-[2rem] border p-6 sm:p-7 ${
             darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'
           }`}>
             <div className="mb-5">
@@ -194,9 +225,9 @@ function Landing({
             <div className="space-y-2.5">
               {workflowSteps.map((step, index) => (
                 <div key={step.number}>
-                  <div className={`rounded-2xl border p-4 ${
-                    darkMode ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50/60'
-                  }`}>
+                    <div className={`rounded-2xl border p-4 transition-transform duration-300 hover:-translate-y-0.5 ${
+                      darkMode ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50/60'
+                    }`}>
                     <div className="flex items-start gap-4">
                       <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-semibold ${
                         darkMode ? 'bg-teal-500/10 text-teal-300' : 'bg-teal-50 text-teal-700'
@@ -227,10 +258,12 @@ function Landing({
 
         <section className="app-container py-2 sm:py-4">
           <div className="grid gap-4 lg:grid-cols-3">
-            {reasons.map((reason) => (
+            {reasons.map((reason, index) => (
               <article
                 key={reason.title}
-                className={`rounded-2xl border p-6 ${
+                data-reveal
+                style={{ '--reveal-delay': `${index * 90}ms` }}
+                className={`reveal-on-scroll rounded-2xl border p-6 ${
                   darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'
                 }`}
               >
@@ -246,7 +279,7 @@ function Landing({
         </section>
 
         <section className="app-container py-10 sm:py-14">
-          <div className="mb-6 max-w-2xl">
+          <div data-reveal className="reveal-on-scroll mb-6 max-w-2xl">
             <p className={`text-sm font-medium uppercase tracking-[0.16em] ${
               darkMode ? 'text-slate-400' : 'text-slate-500'
             }`}>
@@ -260,10 +293,12 @@ function Landing({
           </div>
 
           <div className="grid gap-4 lg:grid-cols-3">
-            {modules.map((module) => (
+            {modules.map((module, index) => (
               <article
                 key={module.title}
-                className={`rounded-2xl border p-6 ${
+                data-reveal
+                style={{ '--reveal-delay': `${index * 110}ms` }}
+                className={`reveal-on-scroll rounded-2xl border p-6 ${
                   darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'
                 }`}
               >
@@ -276,7 +311,7 @@ function Landing({
                 <button
                   type="button"
                   onClick={() => handleTargetOpen(module.target)}
-                  className={`mt-5 inline-flex items-center rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
+                  className={`mt-5 inline-flex items-center rounded-xl border px-4 py-2.5 text-sm font-medium transition-all duration-300 hover:-translate-y-0.5 ${
                     darkMode
                       ? 'border-slate-700 text-slate-100 hover:border-slate-600 hover:bg-slate-800'
                       : 'border-slate-200 text-slate-800 hover:border-slate-300 hover:bg-slate-50'
@@ -290,7 +325,7 @@ function Landing({
         </section>
 
         <section className="app-container pb-14 sm:pb-20">
-          <div className={`rounded-[2rem] border px-6 py-8 sm:px-8 sm:py-10 ${
+          <div data-reveal className={`reveal-on-scroll rounded-[2rem] border px-6 py-8 sm:px-8 sm:py-10 ${
             darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'
           }`}>
             <div className="max-w-3xl">
@@ -309,14 +344,14 @@ function Landing({
               <button
                 type="button"
                 onClick={onOpenCalculator}
-                className="btn btn-primary min-h-[48px] rounded-xl px-5"
+                className="btn btn-primary min-h-[48px] rounded-xl px-5 transition-transform duration-300 hover:-translate-y-0.5"
               >
                 Start with calculator
               </button>
               <button
                 type="button"
                 onClick={onOpenExamples}
-                className={`btn min-h-[48px] rounded-xl border px-5 ${
+                className={`btn min-h-[48px] rounded-xl border px-5 transition-transform duration-300 hover:-translate-y-0.5 ${
                   darkMode
                     ? 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-600 hover:bg-slate-800'
                     : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50'
