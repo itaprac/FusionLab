@@ -63,13 +63,6 @@ function Sidebar({
 
         <nav className="p-2">
           <button
-            onClick={() => onNavigate('landing')}
-            className={buttonBase(activeView === 'landing')}
-          >
-            Overview
-          </button>
-
-          <button
             onClick={() => onNavigate('mlfusion')}
             className={buttonBase(activeView === 'mlfusion')}
           >

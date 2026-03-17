@@ -5,7 +5,7 @@ const reasons = [
   },
   {
     title: 'Compare methods in one place',
-    description: 'Use the same interface to demonstrate both Dempster-Shafer Theory and PCR5.',
+    description: 'Use the same interface to demonstrate both Dempster-Shafer Theory and DSmT.',
   },
   {
     title: 'Present real examples',
@@ -43,7 +43,7 @@ const workflowSteps = [
   {
     number: '02',
     title: 'Choose a fusion method',
-    description: 'Compare DST and PCR5 depending on how you want to handle conflict between sources.',
+    description: 'Compare DST and DSmT depending on how you want to handle conflict between sources.',
   },
   {
     number: '03',
@@ -93,6 +93,15 @@ function Landing({
                   : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50'
               }`}
             >
+              {darkMode ? (
+                <svg className="mr-2 inline-block h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              ) : (
+                <svg className="mr-2 inline-block h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                </svg>
+              )}
               {darkMode ? 'Light mode' : 'Dark mode'}
             </button>
 
@@ -125,7 +134,7 @@ function Landing({
             }`}>
               <p>
                 Fusion Lab helps explain how uncertain or conflicting sources can be combined
-                into one fused result using Dempster-Shafer Theory and PCR5.
+                into one fused result using Dempster-Shafer Theory and DSmT.
               </p>
               <p>
                 Instead of showing only formulas or raw inputs, the app lets you present the
@@ -182,7 +191,7 @@ function Landing({
               </h2>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-2.5">
               {workflowSteps.map((step, index) => (
                 <div key={step.number}>
                   <div className={`rounded-2xl border p-4 ${
@@ -206,8 +215,8 @@ function Landing({
                   </div>
 
                   {index < workflowSteps.length - 1 && (
-                    <div className="flex justify-center py-2">
-                      <div className={`h-6 w-px ${darkMode ? 'bg-slate-700' : 'bg-slate-300'}`} />
+                    <div className="flex justify-center py-1">
+                      <div className={`h-4 w-px ${darkMode ? 'bg-slate-700' : 'bg-slate-300'}`} />
                     </div>
                   )}
                 </div>
