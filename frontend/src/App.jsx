@@ -46,6 +46,18 @@ function App() {
     setActiveView('calculator')
   }
 
+  if (activeView === 'landing') {
+    return (
+      <Landing
+        darkMode={darkMode}
+        onToggleDarkMode={toggleDarkMode}
+        onOpenCalculator={() => setActiveView('calculator')}
+        onOpenMLPipeline={() => setActiveView('mlfusion')}
+        onOpenExamples={() => setActiveView('examples')}
+      />
+    )
+  }
+
   return (
     <div className="min-h-screen transition-colors flex">
       <Sidebar
@@ -67,14 +79,6 @@ function App() {
         <main className="pb-12">
           <div className="app-container">
             <div className="app-surface p-6">
-              {activeView === 'landing' && (
-                <Landing
-                  darkMode={darkMode}
-                  onOpenCalculator={() => setActiveView('calculator')}
-                  onOpenMLPipeline={() => setActiveView('mlfusion')}
-                  onOpenExamples={() => setActiveView('examples')}
-                />
-              )}
               {activeView === 'calculator' && (
                 <Calculator
                   darkMode={darkMode}
