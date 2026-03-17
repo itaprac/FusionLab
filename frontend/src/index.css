@@ -85,10 +85,24 @@
 	.chip {
 		@apply inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300;
 	}
+
+	.landing-page {
+		background-image:
+			radial-gradient(circle at top left, rgba(20, 184, 166, 0.06), transparent 26%),
+			radial-gradient(circle at top right, rgba(148, 163, 184, 0.08), transparent 24%),
+			linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 1));
+	}
 }
 
 .dark .app-surface {
 	background: rgba(15, 23, 42, 0.96);
+}
+
+.dark .landing-page {
+	background-image:
+		radial-gradient(circle at top left, rgba(45, 212, 191, 0.08), transparent 22%),
+		radial-gradient(circle at top right, rgba(148, 163, 184, 0.08), transparent 22%),
+		linear-gradient(180deg, rgba(2, 6, 23, 0.98), rgba(3, 7, 18, 1));
 }
 
 @media (prefers-reduced-motion: reduce) {
