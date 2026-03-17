@@ -6,7 +6,7 @@ function Examples({ darkMode, onOpenCalculator }) {
           Examples
         </h2>
         <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-          Wybierz, do którego modułu chcesz przejść.
+          Choose a guided scenario to see how fusion works in practice.
         </p>
       </div>
 

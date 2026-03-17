@@ -21,9 +21,11 @@ function Sidebar({
       : (darkMode ? 'text-gray-300 hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-50'),
   ].join(' ')
 
-  const expanderBase = () => [
+  const expanderBase = (isActive) => [
     'w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
-    darkMode ? 'text-gray-300 hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-50',
+    isActive
+      ? (darkMode ? 'bg-teal-500/10 text-teal-200 border border-teal-500/30' : 'bg-teal-50 text-teal-800 border border-teal-200')
+      : (darkMode ? 'text-gray-300 hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-50'),
   ].join(' ')
 
   return (
@@ -61,10 +63,17 @@ function Sidebar({
 
         <nav className="p-2">
           <button
+            onClick={() => onNavigate('landing')}
+            className={buttonBase(activeView === 'landing')}
+          >
+            Overview
+          </button>
+
+          <button
             onClick={() => onNavigate('mlfusion')}
             className={buttonBase(activeView === 'mlfusion')}
           >
-            MLFusion
+            ML Fusion
           </button>
 
           <button
@@ -75,8 +84,11 @@ function Sidebar({
           </button>
 
           <button
-            onClick={() => setExamplesExpanded(v => !v)}
-            className={expanderBase()}
+            onClick={() => {
+              onNavigate('examples')
+              setExamplesExpanded(v => (isExamplesView ? !v : true))
+            }}
+            className={expanderBase(isExamplesView)}
           >
             <span className="flex items-center justify-between gap-3">
               <span>Examples</span>

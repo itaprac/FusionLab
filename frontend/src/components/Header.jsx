@@ -23,6 +23,11 @@ function Header({ darkMode, onToggleSidebar, sidebarOpen, onHome }) {
             <h1 className="text-lg font-semibold tracking-tight">
               Fusion Lab
             </h1>
+            <p className={`mt-0.5 text-xs uppercase tracking-[0.16em] ${
+              darkMode ? 'text-slate-400' : 'text-slate-500'
+            }`}>
+              Evidence fusion for uncertain data
+            </p>
           </button>
         </div>
       </div>

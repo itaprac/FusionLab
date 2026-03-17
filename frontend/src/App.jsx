@@ -67,7 +67,14 @@ function App() {
         <main className="pb-12">
           <div className="app-container">
             <div className="app-surface p-6">
-              {activeView === 'landing' && <Landing darkMode={darkMode} />}
+              {activeView === 'landing' && (
+                <Landing
+                  darkMode={darkMode}
+                  onOpenCalculator={() => setActiveView('calculator')}
+                  onOpenMLPipeline={() => setActiveView('mlfusion')}
+                  onOpenExamples={() => setActiveView('examples')}
+                />
+              )}
               {activeView === 'calculator' && (
                 <Calculator
                   darkMode={darkMode}
