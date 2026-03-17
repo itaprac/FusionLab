@@ -93,7 +93,7 @@
 
 .landing-venn {
 	position: relative;
-	height: 320px;
+	height: 240px;
 }
 
 .landing-venn-circle,
@@ -110,20 +110,21 @@
 }
 
 .landing-venn-circle {
-	width: 120px;
-	height: 120px;
-	font-size: 0.9rem;
+	width: 150px;
+	height: 150px;
+	font-size: 1rem;
 	font-weight: 600;
 }
 
 .landing-venn-center {
 	left: 50%;
 	top: 50%;
-	width: 180px;
-	height: 180px;
+	width: 112px;
+	height: 112px;
 	transform: translate(-50%, -50%);
 	flex-direction: column;
 	background: rgba(255, 255, 255, 0.84);
+	z-index: 2;
 }
 
 .landing-venn-center strong {
@@ -132,23 +133,18 @@
 
 .landing-venn-center span {
 	margin-top: 0.35rem;
-	font-size: 0.95rem;
+	font-size: 0.82rem;
 	color: rgb(100 116 139);
 }
 
-.landing-venn-a {
-	left: 34px;
-	top: 44px;
+.landing-venn-left {
+	left: 56px;
+	top: 40px;
 }
 
-.landing-venn-b {
-	right: 34px;
-	top: 44px;
-}
-
-.landing-venn-c {
-	left: 132px;
-	bottom: 18px;
+.landing-venn-right {
+	right: 56px;
+	top: 40px;
 }
 
 .landing-venn-dark {
@@ -163,33 +159,28 @@
 
 @media (max-width: 640px) {
 	.landing-venn {
-		height: 260px;
+		height: 220px;
 	}
 
 	.landing-venn-circle {
-		width: 96px;
-		height: 96px;
+		width: 126px;
+		height: 126px;
 		font-size: 0.8rem;
 	}
 
 	.landing-venn-center {
-		width: 150px;
-		height: 150px;
+		width: 96px;
+		height: 96px;
 	}
 
-	.landing-venn-a {
-		left: 12px;
-		top: 36px;
+	.landing-venn-left {
+		left: 18px;
+		top: 38px;
 	}
 
-	.landing-venn-b {
-		right: 12px;
-		top: 36px;
-	}
-
-	.landing-venn-c {
-		left: 88px;
-		bottom: 8px;
+	.landing-venn-right {
+		right: 18px;
+		top: 38px;
 	}
 }
 
