@@ -798,6 +798,8 @@ def execute_ml_fusion(
                 fused, conflict = dempster_fusion(sample_bbas)
             elif fusion_method == "pcr5":
                 fused, conflict = pcr5_fusion(sample_bbas)
+            elif fusion_method == "pcr6":
+                fused, conflict = pcr6_fusion(sample_bbas)
             else:
                 raise HTTPException(status_code=400, detail="Unknown fusion method")
 
@@ -852,8 +854,8 @@ def fuse_ml(request: MLFusionRequest):
 
     Frontend wysyła:
     {
-      "datasetId": "iris",
-      "models": ["svm", "rf"],
+      "datasetId": "digits",
+      "models": ["svm", "rf", "logistic_regression"],
       "fusionMethod": "dempster"
     }
     """

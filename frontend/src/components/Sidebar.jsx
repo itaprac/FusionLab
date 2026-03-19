@@ -63,6 +63,13 @@ function Sidebar({
 
         <nav className="p-2">
           <button
+            onClick={() => onNavigate('home')}
+            className={buttonBase(activeView === 'home')}
+          >
+            Home
+          </button>
+
+          <button
             onClick={() => onNavigate('mlfusion')}
             className={buttonBase(activeView === 'mlfusion')}
           >
@@ -105,7 +112,13 @@ function Sidebar({
                 onClick={() => onNavigate('examples_calculator')}
                 className={buttonBase(activeView === 'examples_calculator')}
               >
-                Calculator
+                Fusion Calculator
+              </button>
+              <button
+                onClick={() => onNavigate('examples_mlfusion')}
+                className={buttonBase(activeView === 'examples_mlfusion')}
+              >
+                ML Fusion
               </button>
             </div>
           )}

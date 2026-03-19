@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
-import Landing from './components/Landing'
+import Home from './components/Home'
 import MLPipeline from './components/MLPipeline'
 import Calculator from './components/Calculator'
 import Examples from './components/Examples'
 import ExampleCalculator from './components/ExampleCalculator'
+import ExampleMLFusion from './components/ExampleMLFusion'
 
 function App() {
-  const [activeView, setActiveView] = useState('landing')
+  const [activeView, setActiveView] = useState('home')
   const [calculatorPreset, setCalculatorPreset] = useState(null) // { exampleId, methodId }
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -46,18 +47,6 @@ function App() {
     setActiveView('calculator')
   }
 
-  if (activeView === 'landing') {
-    return (
-      <Landing
-        darkMode={darkMode}
-        onToggleDarkMode={toggleDarkMode}
-        onOpenCalculator={() => setActiveView('calculator')}
-        onOpenMLPipeline={() => setActiveView('mlfusion')}
-        onOpenExamples={() => setActiveView('examples')}
-      />
-    )
-  }
-
   return (
     <div className="min-h-screen transition-colors flex">
       <Sidebar
@@ -73,12 +62,20 @@ function App() {
           darkMode={darkMode}
           onToggleSidebar={toggleSidebar}
           sidebarOpen={sidebarOpen}
-          onHome={() => setActiveView('landing')}
+          onHome={() => setActiveView('home')}
         />
 
         <main className="pb-12">
           <div className="app-container">
             <div className="app-surface p-6">
+              {activeView === 'home' && (
+                <Home
+                  darkMode={darkMode}
+                  onOpenCalculator={() => setActiveView('calculator')}
+                  onOpenMLPipeline={() => setActiveView('mlfusion')}
+                  onOpenExamples={() => setActiveView('examples')}
+                />
+              )}
               {activeView === 'calculator' && (
                 <Calculator
                   darkMode={darkMode}
@@ -92,10 +89,14 @@ function App() {
                 <Examples
                   darkMode={darkMode}
                   onOpenCalculator={() => setActiveView('examples_calculator')}
+                  onOpenMLFusion={() => setActiveView('examples_mlfusion')}
                 />
               )}
               {activeView === 'examples_calculator' && (
                 <ExampleCalculator darkMode={darkMode} onTryIt={testAvalancheExample} />
+              )}
+              {activeView === 'examples_mlfusion' && (
+                <ExampleMLFusion darkMode={darkMode} onTryIt={() => setActiveView('mlfusion')} />
               )}
             </div>
           </div>

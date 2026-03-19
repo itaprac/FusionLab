@@ -72,7 +72,7 @@ function ResultCard({ result, methodId, methodName, darkMode, displayOrder }) {
         <div>
           <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Method: </span>
           <span className={`text-sm font-medium ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>
-            {methodName || (methodId === 'dempster' ? 'Dempster-Shafer' : methodId === 'pcr5' ? 'PCR5' : '—')}
+            {methodName || (methodId === 'dempster' ? 'Dempster-Shafer' : methodId === 'pcr5' ? 'PCR5' : methodId === 'pcr6' ? 'PCR6' : '—')}
           </span>
         </div>
         <div className="text-right">
@@ -82,7 +82,9 @@ function ResultCard({ result, methodId, methodName, darkMode, displayOrder }) {
           </span>
           {result.conflict === null && (
             <p className={`text-xs mt-0.5 ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-              {methodId === 'pcr5' ? 'PCR5 redistributes conflict' : 'Multiple sources'}
+              {methodId === 'pcr5' || methodId === 'pcr6'
+                ? 'PCR redistributes conflict'
+                : 'Multiple sources'}
             </p>
           )}
         </div>
