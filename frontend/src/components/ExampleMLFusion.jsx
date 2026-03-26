@@ -1,14 +1,10 @@
 import { useEffect, useState } from 'react'
 
-const EXAMPLE_CONFIG = {
+const CFG = {
   datasetId: 'digits',
   datasetName: 'Optical recognition of handwritten digits',
   models: ['svm', 'rf', 'logistic_regression'],
-  modelNames: {
-    svm: 'Support Vector Machine (SVM)',
-    rf: 'Random Forest',
-    logistic_regression: 'Logistic Regression',
-  },
+  modelNames: { svm: 'Support Vector Machine', rf: 'Random Forest', logistic_regression: 'Logistic Regression' },
   fusionMethod: 'dempster',
   fusionMethodName: 'Dempster-Shafer Theory (DST)',
 }
@@ -20,260 +16,209 @@ function ExampleMLFusion({ darkMode, onTryIt }) {
 
   useEffect(() => {
     let cancelled = false
-
     const run = async () => {
-      setLoading(true)
-      setError(null)
-      setResults(null)
-
+      setLoading(true); setError(null); setResults(null)
       try {
-        const response = await fetch('/api/ml/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            datasetId: EXAMPLE_CONFIG.datasetId,
-            models: EXAMPLE_CONFIG.models,
-            fusionMethod: EXAMPLE_CONFIG.fusionMethod,
-          }),
-        })
-
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.detail || 'ML Fusion failed')
-        if (cancelled) return
-        setResults(data.results)
-      } catch (e) {
-        if (cancelled) return
-        setError(e.message)
-      } finally {
-        if (cancelled) return
-        setLoading(false)
-      }
+        const r = await fetch('/api/ml/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ datasetId: CFG.datasetId, models: CFG.models, fusionMethod: CFG.fusionMethod }) })
+        const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'ML Fusion failed')
+        if (!cancelled) setResults(d.results)
+      } catch (e) { if (!cancelled) setError(e.message) }
+      finally { if (!cancelled) setLoading(false) }
     }
-
     run()
     return () => { cancelled = true }
   }, [])
 
-  const fmt = (value) => {
-    if (value === null || typeof value === 'undefined' || Number.isNaN(Number(value))) return '-'
-    return `${(Number(value) * 100).toFixed(1)}%`
-  }
-
-  const fmtDec = (value) => {
-    if (value === null || typeof value === 'undefined' || Number.isNaN(Number(value))) return '-'
-    return Number(value).toFixed(3)
-  }
+  const fmt = (v) => { if (v == null || Number.isNaN(Number(v))) return '-'; return `${(Number(v) * 100).toFixed(1)}%` }
+  const fmtDec = (v) => { if (v == null || Number.isNaN(Number(v))) return '-'; return Number(v).toFixed(3) }
 
   return (
-    <div>
-      <div className="mb-6">
-        <h2 className={`text-3xl font-semibold tracking-tight mt-3 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+    <div className="space-y-10">
+      <div className="max-w-3xl">
+        <p className="label">Guided ML example</p>
+        <h1 className="mt-3 text-2xl font-semibold tracking-[-0.03em]" style={{ color: 'var(--text-strong)' }}>
           Why fusing ML models can outperform individual classifiers
-        </h2>
+        </h1>
+        <div className="mt-5 space-y-3 text-sm leading-7" style={{ color: 'var(--text)' }}>
+          <p>
+            Every classifier has blind spots. A Support Vector Machine may excel at separating
+            classes with clear margins but struggle with overlapping distributions. A Random Forest
+            handles noisy features well but can overfit to certain patterns. Logistic Regression
+            provides well-calibrated probabilities but assumes linear decision boundaries.
+          </p>
+          <p>
+            By training multiple models on the same dataset and fusing their probabilistic outputs
+            using <strong style={{ color: 'var(--text-strong)' }}>Dempster-Shafer Theory</strong>,
+            we treat each classifier's class probabilities as belief masses and combine them.
+            The fusion process weighs each model's confidence and resolves disagreements, often
+            producing predictions that are more robust than any individual model alone.
+          </p>
+        </div>
+      </div>
 
-        <div className={`mt-4 max-w-4xl ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-          <div className="text-base md:text-lg leading-relaxed space-y-3">
-            <p>
-              A single classifier may perform well on most of the data, but every model has blind spots — regions of the
-              feature space where it is uncertain or makes systematic errors. By training multiple classifiers and fusing
-              their probabilistic outputs through Dempster-Shafer Theory, we can combine their strengths while reducing
-              individual weaknesses.
+      <section className="border-t pt-8" style={{ borderColor: 'var(--line)' }}>
+        <h2 className="text-base font-semibold" style={{ color: 'var(--text-strong)' }}>Pipeline configuration</h2>
+        <p className="mt-2 max-w-2xl text-sm leading-7" style={{ color: 'var(--text)' }}>
+          We use the classic Digits dataset (a simplified version of MNIST) with three diverse classifiers.
+          Each model is trained independently on the same train/test split, then their test-set
+          probability outputs are fused sample-by-sample using the Dempster combination rule.
+        </p>
+        <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-3">
+          <div className="rounded-lg border p-4" style={{ borderColor: 'var(--line)', background: 'var(--bg-elevated)' }}>
+            <p className="label">Dataset</p>
+            <p className="mt-1 text-sm font-medium" style={{ color: 'var(--text-strong)' }}>{CFG.datasetName}</p>
+            <p className="mt-1 text-xs leading-5" style={{ color: 'var(--text-muted)' }}>
+              1,797 samples of 8×8 pixel images, 64 features (pixel intensities), 10 classes (digits 0–9).
             </p>
-            <p>
-              The example below trains three different classifiers on the handwritten digits dataset and fuses their
-              predictions to show how the combined result compares to each model individually.
+          </div>
+          <div className="rounded-lg border p-4" style={{ borderColor: 'var(--line)', background: 'var(--bg-elevated)' }}>
+            <p className="label">Models</p>
+            <div className="mt-1 space-y-1">
+              {CFG.models.map(id => (
+                <p key={id} className="text-sm font-medium" style={{ color: 'var(--text-strong)' }}>{CFG.modelNames[id]}</p>
+              ))}
+            </div>
+            <p className="mt-2 text-xs leading-5" style={{ color: 'var(--text-muted)' }}>
+              Three architecturally different classifiers to maximise diversity.
+            </p>
+          </div>
+          <div className="rounded-lg border p-4" style={{ borderColor: 'var(--line)', background: 'var(--bg-elevated)' }}>
+            <p className="label">Fusion method</p>
+            <p className="mt-1 text-sm font-medium" style={{ color: 'var(--text-strong)' }}>{CFG.fusionMethodName}</p>
+            <p className="mt-1 text-xs leading-5" style={{ color: 'var(--text-muted)' }}>
+              Classifier probabilities are treated as belief masses and combined via Dempster's rule with normalisation.
             </p>
           </div>
         </div>
+      </section>
 
-        <div className="mt-8 flex items-center gap-2">
-          <svg
-            className={`w-5 h-5 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-          </svg>
-          <h2 className={`text-xl font-semibold tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-            Example: Handwritten digits with SVM, Random Forest, and Logistic Regression
-          </h2>
-        </div>
+      <section className="border-t pt-8" style={{ borderColor: 'var(--line)' }}>
+        <h2 className="text-base font-semibold" style={{ color: 'var(--text-strong)' }}>Results</h2>
 
-        <div className={`mt-3 max-w-4xl ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-          <div className="text-base md:text-lg leading-relaxed space-y-3">
-            <p>
-              The digits dataset bundles small grayscale scans of handwritten digits (0–9). Each image is flattened into
-              64 pixel intensities from an 8×8 grid—simple enough to run quickly, yet rich enough to compare how
-              different learners behave on the same features.
-            </p>
-            <p>
-              We combine three common choices: SVM (margin-based, strong with scaled inputs), Random Forest
-              (ensemble of decision trees), and Logistic Regression (linear boundaries in feature space). Each outputs
-              class probabilities; those distributions are turned into belief masses and fused with Dempster’s rule of
-              combination.
-            </p>
-          </div>
-        </div>
+        {loading && <p className="mt-3 text-sm" style={{ color: 'var(--text-muted)' }}>Training models and running fusion…</p>}
+        {error && <p className="mt-3 text-sm" style={{ color: 'var(--danger)' }}>Failed: {error}</p>}
 
-        <div className="mt-8">
-          <div className="mb-4">
-            <div className="flex items-center gap-2">
-              <svg
-                className={`w-5 h-5 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
+        {!loading && results && (() => {
+          const fusionRow = results.find(r => r.kind === 'fusion')
+          const individualRows = results.filter(r => r.kind !== 'fusion')
+          const bestIndividual = individualRows.reduce((best, r) => {
+            const acc = Number(r.accuracy) || 0
+            return acc > (Number(best?.accuracy) || 0) ? r : best
+          }, individualRows[0])
+          const fusionAcc = fusionRow ? Number(fusionRow.accuracy) || 0 : 0
+          const bestAcc = bestIndividual ? Number(bestIndividual.accuracy) || 0 : 0
+          const fusionWins = fusionAcc >= bestAcc
+
+          return (
+            <>
+              <div
+                className="result-enter mt-5 overflow-hidden rounded-xl border"
+                style={{ borderColor: 'var(--line)' }}
               >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-              </svg>
-              <h3 className={`text-xl font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                Pipeline configuration
-              </h3>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className={`rounded-2xl border p-5 ${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${darkMode ? 'text-teal-300/80' : 'text-teal-700/80'}`}>
-                Dataset
-              </p>
-              <p className={`mt-2 font-medium ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-                {EXAMPLE_CONFIG.datasetName}
-              </p>
-              <p className={`mt-1 text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                1,797 samples, 64 features (8×8 pixels), 10 classes
-              </p>
-            </div>
-
-            <div className={`rounded-2xl border p-5 ${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${darkMode ? 'text-teal-300/80' : 'text-teal-700/80'}`}>
-                Models
-              </p>
-              <div className="mt-2 space-y-1">
-                {EXAMPLE_CONFIG.models.map(id => (
-                  <p key={id} className={`font-medium ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-                    {EXAMPLE_CONFIG.modelNames[id]}
-                  </p>
-                ))}
-              </div>
-            </div>
-
-            <div className={`rounded-2xl border p-5 ${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${darkMode ? 'text-teal-300/80' : 'text-teal-700/80'}`}>
-                Fusion method
-              </p>
-              <p className={`mt-2 font-medium ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-                {EXAMPLE_CONFIG.fusionMethodName}
-              </p>
-              <p className={`mt-1 text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Probabilistic outputs treated as belief masses
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-10">
-          <h2 className={`text-xl font-semibold tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-            Results
-          </h2>
-
-          <div className={`mt-4 max-w-4xl ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-            <div className={`mt-3 text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-              {loading && 'Training models and running fusion…'}
-              {!loading && error && `Failed to compute results: ${error}`}
-            </div>
-
-            {!loading && results && (
-              <>
-                <div className="mb-4">
-                  <div className="text-base leading-relaxed space-y-2">
-                    <p>
-                      The table below shows individual model metrics alongside the fused result.
-                      Notice how fusion can match or exceed the best single model by combining
-                      complementary information from all classifiers.
+                <div
+                  className="flex items-center gap-2 px-4 py-2.5"
+                  style={{ background: 'var(--accent-soft)', borderBottom: '1px solid var(--line)' }}
+                >
+                  <svg className="h-4 w-4" style={{ color: 'var(--accent)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-xs font-bold tracking-wide uppercase" style={{ color: 'var(--accent-strong)' }}>Pipeline Result</span>
+                </div>
+                <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.15em]" style={{ color: 'var(--text-muted)' }}>
+                      Fusion accuracy
+                    </p>
+                    <span className="mono text-2xl font-bold tracking-tight" style={{ color: 'var(--accent-strong)' }}>
+                      {fmt(fusionRow?.accuracy)}
+                    </span>
+                  </div>
+                  <div className="sm:text-right">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.15em]" style={{ color: 'var(--text-muted)' }}>
+                      Best individual
+                    </p>
+                    <p className="mono mt-1 text-base font-semibold" style={{ color: 'var(--text-strong)' }}>
+                      {fmt(bestIndividual?.accuracy)}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: fusionWins ? 'var(--accent-strong)' : 'var(--text-muted)' }}>
+                      {fusionWins ? 'Fusion matches or beats individual models' : 'Individual model outperforms fusion'}
                     </p>
                   </div>
                 </div>
-
-                <div className={`rounded-2xl border overflow-hidden ${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`}>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className={darkMode ? 'text-gray-300' : 'text-gray-700'}>
-                          <th className="text-left font-semibold px-4 py-3">Model</th>
-                          <th className="text-left font-semibold px-4 py-3">Accuracy</th>
-                          <th className="text-left font-semibold px-4 py-3">Precision</th>
-                          <th className="text-left font-semibold px-4 py-3">Recall</th>
-                          <th className="text-left font-semibold px-4 py-3">F1</th>
-                          <th className="text-left font-semibold px-4 py-3">ROC AUC</th>
-                          <th className="text-left font-semibold px-4 py-3">Conflict</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {results.map((r, idx) => {
-                          const isFusion = r.kind === 'fusion'
-                          const modelName = isFusion
-                            ? `Fusion (${EXAMPLE_CONFIG.fusionMethodName})`
-                            : (EXAMPLE_CONFIG.modelNames[r.model_id] || r.model_id)
-
-                          return (
-                            <tr
-                              key={`${r.kind}-${r.model_id ?? 'fusion'}-${idx}`}
-                              className={`${darkMode ? 'border-t border-gray-800' : 'border-t border-gray-200'} ${
-                                isFusion
-                                  ? darkMode ? 'bg-teal-500/5' : 'bg-teal-50/60'
-                                  : ''
-                              }`}
-                            >
-                              <td className={`px-4 py-2.5 ${isFusion ? 'font-semibold' : ''} ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-                                {modelName}
-                              </td>
-                              <td className={`px-4 py-2.5 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{fmt(r.accuracy)}</td>
-                              <td className={`px-4 py-2.5 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{fmt(r.precision)}</td>
-                              <td className={`px-4 py-2.5 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{fmt(r.recall)}</td>
-                              <td className={`px-4 py-2.5 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{fmt(r.f1_score)}</td>
-                              <td className={`px-4 py-2.5 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{fmt(r.roc_auc)}</td>
-                              <td className={`px-4 py-2.5 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{fmtDec(r.conflict)}</td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </>
-            )}
-
-            <div className="mt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <div className={`text-sm font-semibold ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-                  Want to try different models or datasets?
-                </div>
-                <div className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Open ML Fusion to pick your own configuration.
-                </div>
               </div>
-              <button
-                type="button"
-                onClick={onTryIt}
-                disabled={typeof onTryIt !== 'function'}
-                className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                  typeof onTryIt !== 'function'
-                    ? (darkMode ? 'bg-gray-800 text-gray-500 cursor-not-allowed' : 'bg-gray-100 text-gray-400 cursor-not-allowed')
-                    : (darkMode ? 'bg-gray-200 hover:bg-gray-100 text-gray-900' : 'bg-gray-900 hover:bg-gray-800 text-white')
-                }`}
-              >
-                Open ML Fusion
-              </button>
-            </div>
-          </div>
+
+              <div className="mt-5 max-w-2xl space-y-3 text-sm leading-7" style={{ color: 'var(--text)' }}>
+                <p>
+                  The table below shows each model's test-set metrics alongside the fused result.
+                  Notice how fusion can match or exceed the best single model — it leverages the
+                  complementary strengths of each classifier rather than relying on any one of them.
+                </p>
+                <p>
+                  The <strong style={{ color: 'var(--text-strong)' }}>conflict</strong> column
+                  shows the average pairwise conflict between models' probability distributions
+                  for each test sample. Low conflict means the models broadly agreed; higher values
+                  indicate samples where models disagreed significantly.
+                </p>
+              </div>
+
+              <div className="mt-5 overflow-x-auto rounded-xl border" style={{ borderColor: 'var(--line)' }}>
+                <table className="w-full text-sm" style={{ background: 'var(--bg-elevated)' }}>
+                  <thead>
+                    <tr style={{ color: 'var(--text-muted)', background: 'var(--bg-sunken)' }}>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Model</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Accuracy</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Precision</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Recall</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">F1</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">ROC AUC</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Conflict</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {results.map((r, idx) => {
+                      const isFusion = r.kind === 'fusion'
+                      const name = isFusion ? `Fusion (${CFG.fusionMethodName})` : (CFG.modelNames[r.model_id] || r.model_id)
+                      return (
+                        <tr
+                          key={`${r.kind}-${r.model_id ?? 'fusion'}-${idx}`}
+                          className="border-t"
+                          style={{ borderColor: 'var(--line)', background: isFusion ? 'var(--accent-soft)' : 'transparent' }}
+                        >
+                          <td className="px-4 py-3" style={{ color: 'var(--text-strong)', fontWeight: isFusion ? 700 : 400 }}>
+                            <div className="flex items-center gap-2">
+                              {isFusion && <span className="inline-block h-2 w-2 rounded-full" style={{ background: 'var(--accent)' }} />}
+                              {name}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 mono" style={{ fontWeight: isFusion ? 700 : 400, color: isFusion ? 'var(--accent-strong)' : 'var(--text)' }}>{fmt(r.accuracy)}</td>
+                          <td className="px-4 py-3 mono">{fmt(r.precision)}</td>
+                          <td className="px-4 py-3 mono">{fmt(r.recall)}</td>
+                          <td className="px-4 py-3 mono">{fmt(r.f1_score)}</td>
+                          <td className="px-4 py-3 mono">{fmt(r.roc_auc)}</td>
+                          <td className="px-4 py-3 mono">{fmtDec(r.conflict)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )
+        })()}
+      </section>
+
+      <section className="flex flex-col gap-4 border-t pt-8 sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: 'var(--line)' }}>
+        <div>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>Want to try different models or datasets?</h3>
+          <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>
+            Open the ML Fusion pipeline to pick your own classifiers, upload a custom CSV dataset,
+            and compare Dempster-Shafer against PCR5 or PCR6.
+          </p>
         </div>
-      </div>
+        <button onClick={onTryIt} disabled={typeof onTryIt !== 'function'} className="btn btn-primary shrink-0">
+          Open ML Fusion
+        </button>
+      </section>
     </div>
   )
 }

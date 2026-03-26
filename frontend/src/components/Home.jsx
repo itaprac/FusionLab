@@ -1,236 +1,308 @@
-const MODULES = [
-  {
-    title: 'ML Fusion',
-    description: 'Train or pick classifiers on built-in datasets, then fuse their outputs.',
-    hint: 'Best when you want to show fusion on real model scores.',
-    onOpen: 'ml',
-    icon: 'ml',
-  },
-  {
-    title: 'Fusion Calculator',
-    description: 'Enter BBA masses yourself, switch methods, and inspect conflict and results.',
-    hint: 'Best for precise demos and teaching the mechanics.',
-    onOpen: 'calculator',
-    icon: 'calc',
-  },
-  {
-    title: 'Examples',
-    description: 'Step through ready-made calculator and ML scenarios.',
-    hint: 'Fastest path if you are new to the workspace.',
-    onOpen: 'examples',
-    icon: 'examples',
-  },
-]
+import { useEffect, useRef, useState } from 'react'
 
-const FLOW_STEPS = [
-  { n: 1, title: 'Sources', caption: 'Evidence or classifier scores' },
-  { n: 2, title: 'Method', caption: 'DST, PCR5, or PCR6' },
-  { n: 3, title: 'Fuse', caption: 'Run combination rule' },
-  { n: 4, title: 'Read', caption: 'Beliefs & conflict' },
-]
-
-const METHOD_BLURBS = [
-  {
-    abbr: 'DST',
-    name: 'Dempster–Shafer',
-    text: 'Normalises conflict into the fused masses. Strong when sources mostly agree.',
-  },
-  {
-    abbr: 'DSmT',
-    name: 'PCR5 / PCR6',
-    text: 'Sends conflict back across focal elements. Useful under strong disagreement.',
-  },
-]
-
-function ModuleIcon({ name, darkMode }) {
-  const stroke = darkMode ? 'currentColor' : 'currentColor'
-  const cls = `w-9 h-9 shrink-0 ${darkMode ? 'text-teal-400' : 'text-teal-600'}`
-
-  if (name === 'ml') {
-    return (
-      <svg className={cls} fill="none" stroke={stroke} viewBox="0 0 24 24" aria-hidden>
-        <path strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" d="M3 3v18h18M7 16l4-4 4 4 6-7" />
-      </svg>
+function useOnScreen(ref, threshold = 0.12) {
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    if (!ref.current) return
+    const el = ref.current
+    const obs = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setVisible(true); obs.unobserve(el) } },
+      { threshold }
     )
-  }
-  if (name === 'calc') {
-    return (
-      <svg className={cls} fill="none" stroke={stroke} viewBox="0 0 24 24" aria-hidden>
-        <path strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" d="M9 7h6M9 11h6M9 15h4M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z" />
-      </svg>
-    )
-  }
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [ref, threshold])
+  return visible
+}
+
+function Section({ children, className = '', delay = 0, ...props }) {
+  const ref = useRef(null)
+  const visible = useOnScreen(ref)
+
   return (
-    <svg className={cls} fill="none" stroke={stroke} viewBox="0 0 24 24" aria-hidden>
-      <path strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-    </svg>
+    <section
+      ref={ref}
+      className={className}
+      style={{
+        ...props.style,
+        opacity: visible ? 1 : 0,
+        transform: visible ? 'translateY(0)' : 'translateY(28px)',
+        transition: `opacity 800ms cubic-bezier(0.16,1,0.3,1) ${delay}ms, transform 800ms cubic-bezier(0.16,1,0.3,1) ${delay}ms`,
+      }}
+    >
+      {children}
+    </section>
   )
 }
 
-function Home({ darkMode, onOpenCalculator, onOpenMLPipeline, onOpenExamples }) {
-  const openers = {
-    calculator: onOpenCalculator,
-    ml: onOpenMLPipeline,
-    examples: onOpenExamples,
-  }
+const STEPS = [
+  {
+    title: 'Sources',
+    detail: 'Define evidence or feed classifier probability scores as belief masses.',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+      </svg>
+    ),
+  },
+  {
+    title: 'Method',
+    detail: 'Pick Dempster-Shafer, PCR5, or PCR6 depending on conflict tolerance.',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    ),
+  },
+  {
+    title: 'Fuse',
+    detail: 'Run the combination rule to merge all sources into a single belief distribution.',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+      </svg>
+    ),
+  },
+  {
+    title: 'Result',
+    detail: 'Inspect fused beliefs, dominant hypothesis, and inter-source conflict.',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      </svg>
+    ),
+  },
+]
 
+function Home({ onOpenCalculator, onOpenMLPipeline, onOpenExamples }) {
   return (
     <div>
-      <div className="mb-8 max-w-2xl">
-        <h2 className={`text-xl font-semibold tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-          Home
-        </h2>
-        <p className={`text-base mt-2 leading-relaxed ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-          Combine uncertain sources with <span className={darkMode ? 'text-gray-300' : 'text-gray-800'}>DST</span> or{' '}
-          <span className={darkMode ? 'text-gray-300' : 'text-gray-800'}>DSmT</span> (PCR5/PCR6). Conflict is normalised in DST;
-          in DSmT it is redistributed — try both and compare.
+      {/* Hero */}
+      <section className="mx-auto max-w-6xl px-6 pb-20 pt-16 sm:px-8 sm:pt-24 lg:px-12">
+        <p
+          className="stagger-in label"
+          style={{ animationDelay: '0ms', color: 'var(--accent)' }}
+        >
+          Evidence Fusion Workspace
         </p>
-        <p className={`text-sm mt-2 leading-relaxed ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-          Open a module below or from the sidebar — same destinations.
+        <h1
+          className="stagger-in mt-4 max-w-3xl text-[clamp(2rem,4.5vw,3.4rem)] font-semibold leading-[1.12] tracking-[-0.035em]"
+          style={{ animationDelay: '80ms', color: 'var(--text-strong)' }}
+        >
+          Combine uncertain evidence.{' '}
+          <span style={{ color: 'var(--text-muted)' }}>See the reasoning.</span>
+        </h1>
+        <p
+          className="stagger-in mt-5 max-w-xl text-base leading-7"
+          style={{ animationDelay: '160ms', color: 'var(--text)' }}
+        >
+          Compare Dempster-Shafer and DSmT fusion methods side by side.
+          Inspect how conflict is handled. Run classifier ensembles through the same pipeline.
         </p>
-      </div>
+        <div
+          className="stagger-in mt-8 flex flex-wrap items-center gap-3"
+          style={{ animationDelay: '240ms' }}
+        >
+          <button onClick={onOpenCalculator} className="btn btn-primary">
+            Open Calculator
+          </button>
+          <button onClick={onOpenMLPipeline} className="btn btn-secondary">
+            ML Fusion Pipeline
+          </button>
+        </div>
+      </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-start">
-        <div className="lg:col-span-7 space-y-4">
-          <h3 className={`text-base font-semibold ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>
-            Modules
-          </h3>
-          <div className="flex flex-col gap-4">
-            {MODULES.map((mod) => (
-              <button
-                key={mod.title}
-                type="button"
-                onClick={openers[mod.onOpen]}
-                className={`text-left w-full rounded-2xl border p-5 sm:p-6 transition-colors group ${
-                  darkMode
-                    ? 'border-gray-700 hover:border-teal-500/45 bg-gray-900 hover:bg-gray-900'
-                    : 'border-gray-200 hover:border-teal-400 bg-white hover:bg-white'
-                }`}
+      {/* Pipeline flow */}
+      <Section
+        className="border-y py-16"
+        style={{ borderColor: 'var(--line)', background: 'var(--bg-sunken)' }}
+      >
+        <div className="mx-auto max-w-6xl px-6 sm:px-8 lg:px-12">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="label">How it works</p>
+              <h2
+                className="mt-2 text-xl font-semibold tracking-[-0.02em]"
+                style={{ color: 'var(--text-strong)' }}
               >
-                <div className="flex gap-5">
+                Four steps, same mental model
+              </h2>
+            </div>
+            <p className="max-w-sm text-sm leading-6" style={{ color: 'var(--text-muted)' }}>
+              Whether you type masses by hand or let classifiers produce them, the pipeline stays the same.
+            </p>
+          </div>
+
+          <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-4">
+            {STEPS.map((step, idx) => (
+              <div
+                key={step.title}
+                className="relative rounded-xl border p-5"
+                style={{ borderColor: 'var(--line)', background: 'var(--bg-elevated)' }}
+              >
+                {idx < 3 && (
                   <div
-                    className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-xl ${
-                      darkMode ? 'bg-gray-800/90' : 'bg-teal-50'
-                    }`}
+                    className="absolute -right-3 top-1/2 z-10 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border sm:flex"
+                    style={{ borderColor: 'var(--line-strong)', background: 'var(--bg-sunken)' }}
                   >
-                    <ModuleIcon name={mod.icon} darkMode={darkMode} />
+                    <svg className="w-3 h-3" style={{ color: 'var(--text-muted)' }} fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <span className={`text-base font-semibold ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-                        {mod.title}
-                      </span>
-                      <span
-                        className={`text-base font-medium whitespace-nowrap ${
-                          darkMode ? 'text-teal-400 group-hover:text-teal-300' : 'text-teal-700 group-hover:text-teal-800'
-                        }`}
-                      >
-                        Open →
-                      </span>
-                    </div>
-                    <p className={`text-base mt-2 leading-relaxed ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      {mod.description}
-                    </p>
-                    <p className={`text-sm mt-2.5 leading-snug ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-                      <span className="font-medium text-teal-600 dark:text-teal-400">Tip:</span> {mod.hint}
-                    </p>
+                )}
+                <div className="flex items-center gap-3 mb-3">
+                  <div
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+                    style={{ background: 'var(--accent-soft)', color: 'var(--accent-strong)' }}
+                  >
+                    {step.icon}
                   </div>
+                  <span
+                    className="mono text-[10px] font-bold uppercase tracking-[0.15em]"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    Step {idx + 1}
+                  </span>
                 </div>
-              </button>
+                <h3 className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>
+                  {step.title}
+                </h3>
+                <p className="mt-1.5 text-sm leading-6" style={{ color: 'var(--text-muted)' }}>
+                  {step.detail}
+                </p>
+              </div>
             ))}
           </div>
         </div>
+      </Section>
 
-        <div className="lg:col-span-5 space-y-8">
-          <div>
-            <h3 className={`text-base font-semibold ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>
-              Typical fusion pipeline
-            </h3>
-            <p className={`text-sm mt-1.5 leading-relaxed ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-              Same mental model in calculator and ML fusion — only the source of masses changes.
-            </p>
-            <div
-              className={`mt-5 rounded-2xl border p-5 sm:p-6 ${
-                darkMode ? 'border-gray-700 bg-gray-900/60' : 'border-gray-200 bg-gray-50/90'
-              }`}
-            >
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-5 sm:gap-6">
-                {FLOW_STEPS.map((step) => (
-                  <div key={step.n} className="flex flex-col items-center text-center">
-                    <div
-                      className={`flex h-10 w-10 items-center justify-center rounded-full text-base font-bold ${
-                        darkMode ? 'bg-teal-500/20 text-teal-300' : 'bg-teal-100 text-teal-800'
-                      }`}
-                    >
-                      {step.n}
-                    </div>
-                    <div className={`mt-2.5 text-sm font-semibold ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>
-                      {step.title}
-                    </div>
-                    <div className={`mt-1 text-xs sm:text-sm leading-snug max-w-[10rem] ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-                      {step.caption}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <h3 className={`text-base font-semibold ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>
-              Methods at a glance
-            </h3>
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {METHOD_BLURBS.map((row) => (
-                <div
-                  key={row.abbr}
-                  className={`rounded-2xl border p-5 ${
-                    darkMode ? 'border-gray-700 bg-gray-900/50' : 'border-gray-200 bg-white'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="chip">{row.abbr}</span>
-                    <span className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      {row.name}
-                    </span>
-                  </div>
-                  <p className={`text-base mt-3 leading-relaxed ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                    {row.text}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div
-            className={`rounded-2xl border p-5 sm:p-6 ${
-              darkMode ? 'border-teal-900/50 bg-teal-950/25' : 'border-teal-200 bg-teal-50/80'
-            }`}
+      {/* Features */}
+      <Section className="mx-auto max-w-6xl px-6 py-16 sm:px-8 lg:px-12" delay={80}>
+        <p className="label">Choose your workflow</p>
+        <div className="mt-8 grid gap-6 md:grid-cols-2">
+          <button
+            onClick={onOpenCalculator}
+            className="group rounded-xl border p-6 text-left transition-all duration-200 hover:shadow-sm"
+            style={{ borderColor: 'var(--line)', background: 'var(--bg-elevated)' }}
           >
-            <div className={`text-base font-semibold ${darkMode ? 'text-teal-200' : 'text-teal-900'}`}>
-              Not sure where to start?
-            </div>
-            <p className={`text-sm mt-2 leading-relaxed ${darkMode ? 'text-teal-100/85' : 'text-teal-950/85'}`}>
-              Start with Examples, then use the calculator or ML Fusion with your own inputs.
-            </p>
-            <button
-              type="button"
-              onClick={onOpenExamples}
-              className="mt-4 text-base font-medium text-teal-600 hover:text-teal-500 dark:text-teal-400 dark:hover:text-teal-300"
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-lg mb-4"
+              style={{ background: 'var(--accent-soft)', color: 'var(--accent-strong)' }}
             >
-              Go to Examples →
-            </button>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h3
+              className="text-base font-semibold tracking-[-0.01em]"
+              style={{ color: 'var(--text-strong)' }}
+            >
+              Fusion Calculator
+            </h3>
+            <p className="mt-2 text-sm leading-6" style={{ color: 'var(--text)' }}>
+              Enter belief masses directly, choose a combination rule, and inspect the fused masses in real time.
+            </p>
+            <span
+              className="mt-3 inline-block text-sm font-semibold transition-colors"
+              style={{ color: 'var(--accent-strong)' }}
+            >
+              Open calculator &rarr;
+            </span>
+          </button>
+
+          <button
+            onClick={onOpenMLPipeline}
+            className="group rounded-xl border p-6 text-left transition-all duration-200 hover:shadow-sm"
+            style={{ borderColor: 'var(--line)', background: 'var(--bg-elevated)' }}
+          >
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-lg mb-4"
+              style={{ background: 'var(--accent-soft)', color: 'var(--accent-strong)' }}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+              </svg>
+            </div>
+            <h3
+              className="text-base font-semibold tracking-[-0.01em]"
+              style={{ color: 'var(--text-strong)' }}
+            >
+              ML Fusion Pipeline
+            </h3>
+            <p className="mt-2 text-sm leading-6" style={{ color: 'var(--text)' }}>
+              Pick classifiers and a dataset, train them, and fuse their probabilistic outputs to compare performance.
+            </p>
+            <span
+              className="mt-3 inline-block text-sm font-semibold transition-colors"
+              style={{ color: 'var(--accent-strong)' }}
+            >
+              Open ML fusion &rarr;
+            </span>
+          </button>
+        </div>
+      </Section>
+
+      {/* Methods */}
+      <Section
+        className="border-y py-16"
+        style={{ borderColor: 'var(--line)', background: 'var(--bg-sunken)' }}
+        delay={80}
+      >
+        <div className="mx-auto max-w-6xl px-6 sm:px-8 lg:px-12">
+          <p className="label">Fusion methods</p>
+          <h2
+            className="mt-2 text-xl font-semibold tracking-[-0.02em]"
+            style={{ color: 'var(--text-strong)' }}
+          >
+            DST vs DSmT at a glance
+          </h2>
+
+          <div className="mt-8 grid gap-6 md:grid-cols-2">
+            <div className="rounded-xl border p-5" style={{ borderColor: 'var(--line)', background: 'var(--bg-elevated)' }}>
+              <h3 className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>
+                Dempster-Shafer
+              </h3>
+              <p className="mt-2 text-sm leading-7" style={{ color: 'var(--text)' }}>
+                Normalises conflict into the fused masses. Strong when sources broadly agree
+                and conflict is low. The classic choice for most evidence fusion workflows.
+              </p>
+            </div>
+            <div className="rounded-xl border p-5" style={{ borderColor: 'var(--line)', background: 'var(--bg-elevated)' }}>
+              <h3 className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>
+                PCR5 / PCR6
+              </h3>
+              <p className="mt-2 text-sm leading-7" style={{ color: 'var(--text)' }}>
+                Redistributes conflict back to focal elements proportionally. Better when
+                disagreement between sources is meaningful and you want to preserve nuance.
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      </Section>
 
-      <div className={`mt-12 pt-7 border-t flex flex-wrap items-center gap-3 ${darkMode ? 'border-gray-800' : 'border-gray-200'}`}>
-        <span className="chip">DST</span>
-        <span className="chip">DSmT</span>
-        <span className={`text-sm ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-          Available wherever you pick a fusion method (calculator &amp; ML pipeline).
-        </span>
-      </div>
+      {/* CTA */}
+      <Section className="mx-auto max-w-6xl px-6 py-16 sm:px-8 lg:px-12" delay={80}>
+        <div
+          className="flex flex-col gap-5 rounded-xl border p-6 sm:flex-row sm:items-center sm:justify-between"
+          style={{ borderColor: 'var(--line)', background: 'var(--bg-elevated)' }}
+        >
+          <div>
+            <h2
+              className="text-base font-semibold tracking-[-0.01em]"
+              style={{ color: 'var(--text-strong)' }}
+            >
+              New to evidence fusion?
+            </h2>
+            <p className="mt-1 text-sm leading-6" style={{ color: 'var(--text)' }}>
+              Start with a guided example. See fusion in action before building your own inputs.
+            </p>
+          </div>
+          <button onClick={onOpenExamples} className="btn btn-primary shrink-0">
+            Browse examples
+          </button>
+        </div>
+      </Section>
     </div>
   )
 }

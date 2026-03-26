@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
+import MethodSelector from './MethodSelector'
 
 function MLPipeline({ darkMode }) {
   const [datasets, setDatasets] = useState([])
   const [models, setModels] = useState([])
   const [methods, setMethods] = useState([])
-
   const [selectedDataset, setSelectedDataset] = useState('')
   const [selectedModels, setSelectedModels] = useState([])
   const [selectedMethod, setSelectedMethod] = useState('')
-
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [results, setResults] = useState(null)
@@ -25,824 +24,432 @@ function MLPipeline({ darkMode }) {
 
   const fileInputRef = useRef(null)
   const visibleDatasets = customDataset ? [...datasets, customDataset.dataset] : datasets
-  const formatPercentMetric = (value) => {
-    if (value === null || typeof value === 'undefined' || Number.isNaN(Number(value))) {
-      return '-'
-    }
 
-    return `${(Number(value) * 100).toFixed(2)}%`
+  const fmtPct = (v) => {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return '-'
+    return `${(Number(v) * 100).toFixed(2)}%`
   }
 
-  const formatDecimalMetric = (value) => {
-    if (value === null || typeof value === 'undefined' || Number.isNaN(Number(value))) {
-      return '-'
-    }
-
-    return Number(value).toFixed(2)
+  const fmtDec = (v) => {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return '-'
+    return Number(v).toFixed(2)
   }
 
-  const loadDatasets = async (preferredDatasetId = null) => {
-    const response = await fetch('/api/ml/datasets')
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.detail || 'Failed to load datasets')
-    }
-
+  const loadDatasets = async (preferred = null) => {
+    const res = await fetch('/api/ml/datasets')
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || 'Failed to load datasets')
     setDatasets(data.datasets)
-    setSelectedDataset(currentSelection => {
-      if (preferredDatasetId && data.datasets.some(dataset => dataset.id === preferredDatasetId)) {
-        return preferredDatasetId
-      }
-
-      if (preferredDatasetId && customDataset?.dataset.id === preferredDatasetId) {
-        return preferredDatasetId
-      }
-
-      if (currentSelection && data.datasets.some(dataset => dataset.id === currentSelection)) {
-        return currentSelection
-      }
-
-      if (currentSelection && customDataset?.dataset.id === currentSelection) {
-        return currentSelection
-      }
-
+    setSelectedDataset(cur => {
+      if (preferred && data.datasets.some(d => d.id === preferred)) return preferred
+      if (preferred && customDataset?.dataset.id === preferred) return preferred
+      if (cur && data.datasets.some(d => d.id === cur)) return cur
+      if (cur && customDataset?.dataset.id === cur) return cur
       return data.datasets[0]?.id || ''
     })
   }
 
   useEffect(() => {
     loadDatasets().catch(err => setError(err.message))
-
-    // Fetch models
-    fetch('/api/ml/models')
-      .then(async res => {
-        const data = await res.json()
-        if (!res.ok) {
-          throw new Error(data.detail || 'Failed to load models')
-        }
-        return data
-      })
-      .then(data => {
-        setModels(data.classifiers)
-      })
-      .catch(err => setError(err.message))
-
-    // Fetch fusion methods
-    fetch('/api/methods')
-      .then(async res => {
-        const data = await res.json()
-        if (!res.ok) {
-          throw new Error(data.detail || 'Failed to load methods')
-        }
-        return data
-      })
-      .then(data => {
-          setMethods(data.methods)
-          if (data.methods.length > 0) {
-            setSelectedMethod(data.methods[0].id)
-          }
-      })
-      .catch(err => setError(err.message))
+    fetch('/api/ml/models').then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.detail); return d }).then(d => setModels(d.classifiers)).catch(e => setError(e.message))
+    fetch('/api/methods').then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.detail); return d }).then(d => { setMethods(d.methods); if (d.methods.length) setSelectedMethod(d.methods[0].id) }).catch(e => setError(e.message))
   }, [])
 
-  const toggleModel = (modelId) => {
-    setSelectedModels(prev =>
-      prev.includes(modelId)
-        ? prev.filter(id => id !== modelId)
-        : [...prev, modelId]
-    )
-  }
-
-  const handleUploadClick = () => {
-    fileInputRef.current?.click()
-  }
+  const toggleModel = (id) => setSelectedModels(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
 
   const handleFileChange = async (event) => {
     const file = event.target.files?.[0]
-    if (!file) {
-      return
-    }
-
+    if (!file) return
     setPendingFile(file)
     setSelectedFileName(file.name)
     setPreviewLoading(true)
     setUploadError(null)
     setUploadSummary(null)
     setDatasetPreview(null)
-
-    const formData = new FormData()
-    formData.append('file', file)
-
+    const fd = new FormData(); fd.append('file', file)
     try {
-      const response = await fetch('/api/ml/datasets/preview', {
-        method: 'POST',
-        body: formData
-      })
-
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data.detail || 'Dataset upload failed')
-      }
-
-      const defaultFeatureColumns = data.columns
-        .map(column => column.name)
-        .filter(columnName => columnName !== data.suggestedTargetColumn)
-
-      setDatasetPreview(data)
-      setSelectedTargetColumn(data.suggestedTargetColumn)
-      setSelectedFeatureColumns(defaultFeatureColumns)
-    } catch (err) {
-      setUploadError(err.message)
-      setPendingFile(null)
-    } finally {
-      setPreviewLoading(false)
-      event.target.value = ''
-    }
+      const r = await fetch('/api/ml/datasets/preview', { method: 'POST', body: fd })
+      const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Preview failed')
+      setDatasetPreview(d)
+      setSelectedTargetColumn(d.suggestedTargetColumn)
+      setSelectedFeatureColumns(d.columns.map(c => c.name).filter(n => n !== d.suggestedTargetColumn))
+    } catch (e) { setUploadError(e.message); setPendingFile(null) }
+    finally { setPreviewLoading(false); event.target.value = '' }
   }
 
-  const handleTargetChange = (event) => {
-    const nextTarget = event.target.value
-    setSelectedTargetColumn(nextTarget)
-    setSelectedFeatureColumns(
-      (datasetPreview?.columns || [])
-        .map(column => column.name)
-        .filter(columnName => columnName !== nextTarget)
-    )
+  const handleTargetChange = (e) => {
+    const t = e.target.value
+    setSelectedTargetColumn(t)
+    setSelectedFeatureColumns((datasetPreview?.columns || []).map(c => c.name).filter(n => n !== t))
   }
 
-  const toggleFeatureColumn = (columnName) => {
-    setSelectedFeatureColumns(prev =>
-      prev.includes(columnName)
-        ? prev.filter(name => name !== columnName)
-        : [...prev, columnName]
-    )
-  }
+  const toggleFeatureColumn = (n) => setSelectedFeatureColumns(p => p.includes(n) ? p.filter(x => x !== n) : [...p, n])
 
   const importConfiguredDataset = async () => {
-    if (!pendingFile || !datasetPreview) {
-      setUploadError('Choose a CSV file first.')
-      return
-    }
-
-    if (!selectedTargetColumn) {
-      setUploadError('Select a target column before importing.')
-      return
-    }
-
-    if (selectedFeatureColumns.length === 0) {
-      setUploadError('Select at least one feature column.')
-      return
-    }
-
-    setUploading(true)
-    setUploadError(null)
-
-    const formData = new FormData()
-    formData.append('file', pendingFile)
-    formData.append('target_column', selectedTargetColumn)
-    formData.append('feature_columns', JSON.stringify(selectedFeatureColumns))
-
+    if (!pendingFile || !datasetPreview) { setUploadError('Choose a CSV file first.'); return }
+    if (!selectedTargetColumn) { setUploadError('Select a target column.'); return }
+    if (!selectedFeatureColumns.length) { setUploadError('Select at least one feature column.'); return }
+    setUploading(true); setUploadError(null)
+    const fd = new FormData()
+    fd.append('file', pendingFile); fd.append('target_column', selectedTargetColumn)
+    fd.append('feature_columns', JSON.stringify(selectedFeatureColumns))
     try {
-      const response = await fetch('/api/ml/datasets/upload', {
-        method: 'POST',
-        body: formData
-      })
-
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data.detail || 'Dataset upload failed')
-      }
-
-      setUploadSummary(data)
-      setError(null)
-      setCustomDataset({
-        dataset: data.dataset,
-        file: pendingFile,
-        targetColumn: selectedTargetColumn,
-        featureColumns: selectedFeatureColumns
-      })
-      setSelectedDataset(data.dataset.id)
-    } catch (err) {
-      setUploadError(err.message)
-    } finally {
-      setUploading(false)
-    }
+      const r = await fetch('/api/ml/datasets/upload', { method: 'POST', body: fd })
+      const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Upload failed')
+      setUploadSummary(d); setError(null)
+      setCustomDataset({ dataset: d.dataset, file: pendingFile, targetColumn: selectedTargetColumn, featureColumns: selectedFeatureColumns })
+      setSelectedDataset(d.dataset.id)
+    } catch (e) { setUploadError(e.message) }
+    finally { setUploading(false) }
   }
 
   const runFusion = async () => {
-    if (selectedModels.length < 2) {
-      setError('Please select at least 2 models for fusion')
-      return
-    }
-
-    setError(null)
-    setResults(null)
-    setLoading(true)
-
+    if (selectedModels.length < 2) { setError('Select at least 2 models'); return }
+    setError(null); setResults(null); setLoading(true)
     try {
-      const isCustomDataset = customDataset?.dataset.id === selectedDataset
-      let response
-
-      if (isCustomDataset) {
-        const formData = new FormData()
-        formData.append('file', customDataset.file)
-        formData.append('target_column', customDataset.targetColumn)
-        formData.append('feature_columns', JSON.stringify(customDataset.featureColumns))
-        formData.append('models', JSON.stringify(selectedModels))
-        formData.append('fusion_method', selectedMethod)
-
-        response = await fetch('/api/ml/run-upload', {
-          method: 'POST',
-          body: formData
-        })
+      const isCustom = customDataset?.dataset.id === selectedDataset
+      let r
+      if (isCustom) {
+        const fd = new FormData()
+        fd.append('file', customDataset.file); fd.append('target_column', customDataset.targetColumn)
+        fd.append('feature_columns', JSON.stringify(customDataset.featureColumns))
+        fd.append('models', JSON.stringify(selectedModels)); fd.append('fusion_method', selectedMethod)
+        r = await fetch('/api/ml/run-upload', { method: 'POST', body: fd })
       } else {
-        response = await fetch('/api/ml/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            datasetId: selectedDataset,
-            models: selectedModels,
-            fusionMethod: selectedMethod
-          })
-        })
+        r = await fetch('/api/ml/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ datasetId: selectedDataset, models: selectedModels, fusionMethod: selectedMethod }) })
       }
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'ML Fusion failed')
-      }
-
-      setResults(data.results)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
+      const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'ML Fusion failed')
+      setResults(d.results)
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
   }
 
   return (
-    <div>
-      {/* Dataset Selection */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-3">
-          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold ${
-            darkMode ? 'bg-teal-900/40 text-teal-300' : 'bg-teal-100 text-teal-700'
-          }`}>1</div>
-          <h3 className={`text-sm font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Select Dataset</h3>
+    <div className="space-y-8">
+      {/* Page header */}
+      <div>
+        <p className="label" style={{ color: 'var(--accent)' }}>Model workflow</p>
+        <h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em]" style={{ color: 'var(--text-strong)' }}>
+          ML Fusion
+        </h1>
+        <p className="mt-2 max-w-2xl text-sm leading-7" style={{ color: 'var(--text)' }}>
+          Compare classifiers on the same dataset, fuse their outputs, and inspect how the combined result behaves.
+        </p>
+      </div>
+
+      {/* Step 1: Dataset */}
+      <section className="border-t pt-6" style={{ borderColor: 'var(--line)' }}>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="mono flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold" style={{ background: 'var(--accent-soft)', color: 'var(--accent-strong)' }}>1</span>
+          <p className="label" style={{ margin: 0 }}>Dataset</p>
         </div>
 
-        <div className={`mb-4 overflow-hidden rounded-2xl border ${
-          darkMode ? 'border-teal-900/70 bg-gradient-to-br from-teal-950/70 via-gray-950 to-gray-950' : 'border-teal-100 bg-gradient-to-br from-amber-50 via-white to-teal-50'
-        }`}>
-          <div className="p-5 md:p-6">
-            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-              <div className="max-w-2xl">
-                <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${
-                  darkMode ? 'text-teal-300/80' : 'text-teal-700/80'
-                }`}>
-                  Custom Dataset
-                </p>
-                <h4 className={`mt-2 text-lg font-semibold ${
-                  darkMode ? 'text-white' : 'text-gray-900'
-                }`}>
-                  Upload your own CSV and run the same fusion pipeline
-                </h4>
-                <p className={`mt-2 text-sm leading-6 ${
-                  darkMode ? 'text-gray-300' : 'text-gray-600'
-                }`}>
-                  Format: UTF-8 CSV, comma-separated, header row required. After upload you can choose which column is the target and which columns should be used as features. Numeric and categorical feature columns are both supported.
-                </p>
-              </div>
-
-              <div className="flex w-full flex-col gap-3 md:w-auto md:min-w-72">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv,text/csv"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
-                <button
-                  type="button"
-                  onClick={handleUploadClick}
-                  disabled={previewLoading || uploading}
-                  className={`rounded-2xl px-4 py-3 text-left transition-all ${
-                    previewLoading || uploading
-                      ? darkMode
-                        ? 'cursor-not-allowed bg-gray-800 text-gray-500'
-                        : 'cursor-not-allowed bg-gray-100 text-gray-400'
-                      : darkMode
-                        ? 'bg-teal-400 text-gray-950 shadow-[0_18px_40px_rgba(45,212,191,0.18)] hover:-translate-y-0.5'
-                        : 'bg-teal-600 text-white shadow-[0_18px_40px_rgba(13,148,136,0.24)] hover:-translate-y-0.5'
-                  }`}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {visibleDatasets.map(ds => {
+            const active = selectedDataset === ds.id
+            return (
+              <button
+                key={ds.id}
+                onClick={() => setSelectedDataset(ds.id)}
+                className="option-chip"
+                data-active={active}
+              >
+                <div
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2"
+                  style={{ borderColor: active ? 'var(--accent)' : 'var(--line-strong)' }}
                 >
-                  <span className="block text-sm font-semibold">
-                    {previewLoading ? 'Inspecting columns...' : uploading ? 'Importing dataset...' : 'Choose CSV file'}
-                  </span>
-                  <span className={`mt-1 block text-xs ${
-                    previewLoading || uploading
-                      ? darkMode ? 'text-gray-500' : 'text-gray-400'
-                      : darkMode ? 'text-gray-900/70' : 'text-white/75'
-                  }`}>
-                    {selectedFileName || 'Try the Iris CSV linked in the plan.'}
-                  </span>
-                </button>
+                  {active && <div className="h-2 w-2 rounded-full" style={{ background: 'var(--accent)' }} />}
+                </div>
+                <span className="text-left">
+                  {ds.name}
+                  {ds.id.startsWith('custom_') && (
+                    <span className="ml-1 text-xs" style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(uploaded)</span>
+                  )}
+                </span>
+              </button>
+            )
+          })}
+        </div>
 
-                <div className={`rounded-2xl border px-4 py-3 text-sm ${
-                  darkMode ? 'border-white/10 bg-white/5 text-gray-300' : 'border-white/70 bg-white/80 text-gray-600'
-                }`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Session storage</span>
-                    <span className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] ${
-                      darkMode ? 'bg-teal-400/10 text-teal-300' : 'bg-teal-100 text-teal-700'
-                    }`}>
-                      temporary
+        {/* Upload */}
+        <div className="mt-4 rounded-lg border p-4" style={{ borderColor: 'var(--line)', background: 'var(--bg-sunken)' }}>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>Upload your own CSV</h3>
+              <p className="mt-0.5 text-xs leading-5" style={{ color: 'var(--text-muted)' }}>
+                UTF-8 with header row. Session only — disappears on refresh.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFileChange} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={previewLoading || uploading} className="btn btn-secondary text-xs shrink-0">
+                {previewLoading ? 'Inspecting\u2026' : uploading ? 'Importing\u2026' : 'Choose CSV file'}
+              </button>
+              {selectedFileName && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{selectedFileName}</span>}
+            </div>
+          </div>
+
+          {uploadError && <p className="mt-2 text-xs" style={{ color: 'var(--danger)' }}>{uploadError}</p>}
+
+          {uploadSummary && (
+            <div className="mt-3 text-xs" style={{ color: 'var(--accent-strong)' }}>
+              <span className="font-semibold">{uploadSummary.dataset.name}</span>{' '}
+              <span style={{ color: 'var(--text-muted)' }}>{uploadSummary.rows} rows, {uploadSummary.features} features</span>
+            </div>
+          )}
+        </div>
+
+        {/* Dataset preview */}
+        {datasetPreview && (
+          <div className="mt-4 rounded-lg border p-5" style={{ borderColor: 'var(--line)', background: 'var(--bg-elevated)' }}>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <h4 className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>Column mapping</h4>
+                <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>{datasetPreview.totalRows} rows detected</p>
+              </div>
+              <div className="w-full lg:w-48">
+                <label className="label mb-1 block">Target column</label>
+                <select value={selectedTargetColumn} onChange={handleTargetChange} className="input">
+                  {datasetPreview.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-6">
+              {datasetPreview.columns.map(col => {
+                const isTarget = col.name === selectedTargetColumn
+                const isFeat = selectedFeatureColumns.includes(col.name)
+                return (
+                  <button
+                    key={col.name}
+                    onClick={() => { if (!isTarget) toggleFeatureColumn(col.name) }}
+                    className="option-chip justify-start text-xs"
+                    data-active={isFeat}
+                    style={isTarget ? { borderColor: 'var(--line-strong)', opacity: 0.6 } : {}}
+                  >
+                    <span className="font-medium" style={{ color: 'var(--text-strong)' }}>{col.name}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                      {isTarget ? 'target' : isFeat ? 'feature' : 'off'}
                     </span>
-                  </div>
-                  <p className={`mt-2 text-xs leading-5 ${
-                    darkMode ? 'text-gray-400' : 'text-gray-500'
-                  }`}>
-                    Uploaded datasets stay only in this page session and disappear after refresh.
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="mt-4 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--line)' }}>
+              <table className="min-w-full text-xs" style={{ background: 'var(--bg-elevated)' }}>
+                <thead>
+                  <tr>
+                    {datasetPreview.columns.map(c => (
+                      <th key={c.name} className="border-b px-3 py-2 text-left font-semibold" style={{ borderColor: 'var(--line)', color: 'var(--text)' }}>{c.name}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {datasetPreview.sampleRows.map((row, ri) => (
+                    <tr key={ri} className="border-t" style={{ borderColor: 'var(--line)' }}>
+                      {datasetPreview.columns.map(c => (
+                        <td key={`${ri}-${c.name}`} className="px-3 py-1.5" style={{ color: 'var(--text)' }}>{row[c.name]}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{selectedFeatureColumns.length} features selected</p>
+              <button onClick={importConfiguredDataset} disabled={uploading} className="btn btn-primary">
+                {uploading ? 'Importing\u2026' : 'Import with selected mapping'}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Step 2: Models */}
+      <section className="border-t pt-6" style={{ borderColor: 'var(--line)' }}>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="mono flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold" style={{ background: 'var(--accent-soft)', color: 'var(--accent-strong)' }}>2</span>
+          <p className="label" style={{ margin: 0 }}>ML Models</p>
+        </div>
+        <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>Choose at least 2 models to train and fuse.</p>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {models.map(m => {
+            const sel = selectedModels.includes(m.id)
+            return (
+              <button
+                key={m.id}
+                onClick={() => toggleModel(m.id)}
+                className="option-chip"
+                data-active={sel}
+              >
+                <div
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded border-2"
+                  style={{
+                    borderColor: sel ? 'var(--accent)' : 'var(--line-strong)',
+                    background: sel ? 'var(--accent)' : 'transparent',
+                  }}
+                >
+                  {sel && (
+                    <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </div>
+                {m.name}
+              </button>
+            )
+          })}
+        </div>
+        {selectedModels.length > 0 && (
+          <p className="mt-2 text-xs font-semibold" style={{ color: 'var(--accent-strong)' }}>
+            {selectedModels.length} model{selectedModels.length !== 1 ? 's' : ''} selected
+          </p>
+        )}
+      </section>
+
+      {/* Step 3: Fusion method */}
+      <section className="border-t pt-6" style={{ borderColor: 'var(--line)' }}>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="mono flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold" style={{ background: 'var(--accent-soft)', color: 'var(--accent-strong)' }}>3</span>
+          <p className="label" style={{ margin: 0 }}>Fusion method</p>
+        </div>
+        <MethodSelector methods={methods} selected={selectedMethod} onChange={setSelectedMethod} />
+      </section>
+
+      {/* Run */}
+      <section className="border-t pt-6" style={{ borderColor: 'var(--line)' }}>
+        <div className="flex items-center gap-4">
+          <button onClick={runFusion} disabled={loading || selectedModels.length < 2} className="btn btn-primary">
+            {loading ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Training & Fusing...
+              </span>
+            ) : 'Run ML Fusion Pipeline'}
+          </button>
+          {error && (
+            <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--danger)' }}>
+              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {error}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Results */}
+      {Array.isArray(results) && results.length > 0 && (() => {
+        const fusionRow = results.find(r => r.kind === 'fusion')
+        const individualRows = results.filter(r => r.kind !== 'fusion')
+        const bestIndividual = individualRows.reduce((best, r) => {
+          const acc = Number(r.accuracy) || 0
+          return acc > (Number(best?.accuracy) || 0) ? r : best
+        }, individualRows[0])
+        const fusionAcc = fusionRow ? Number(fusionRow.accuracy) || 0 : 0
+        const bestAcc = bestIndividual ? Number(bestIndividual.accuracy) || 0 : 0
+        const fusionWins = fusionAcc >= bestAcc
+
+        return (
+          <section className="result-enter">
+            <div
+              className="overflow-hidden rounded-xl border mb-6"
+              style={{ borderColor: 'var(--line)' }}
+            >
+              <div
+                className="flex items-center gap-2 px-4 py-2.5"
+                style={{ background: 'var(--accent-soft)', borderBottom: '1px solid var(--line)' }}
+              >
+                <svg className="h-4 w-4" style={{ color: 'var(--accent)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-xs font-bold tracking-wide uppercase" style={{ color: 'var(--accent-strong)' }}>Pipeline Result</span>
+              </div>
+              <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.15em]" style={{ color: 'var(--text-muted)' }}>
+                    Fusion accuracy
+                  </p>
+                  <span className="mono text-2xl font-bold tracking-tight" style={{ color: 'var(--accent-strong)' }}>
+                    {fmtPct(fusionRow?.accuracy)}
+                  </span>
+                </div>
+                <div className="sm:text-right">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.15em]" style={{ color: 'var(--text-muted)' }}>
+                    Best individual
+                  </p>
+                  <p className="mono mt-1 text-base font-semibold" style={{ color: 'var(--text-strong)' }}>
+                    {fmtPct(bestIndividual?.accuracy)}
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: fusionWins ? 'var(--accent-strong)' : 'var(--text-muted)' }}>
+                    {fusionWins ? 'Fusion matches or beats individual models' : 'Individual model outperforms fusion'}
                   </p>
                 </div>
               </div>
             </div>
 
-            {uploadError && (
-              <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
-                darkMode
-                  ? 'border-red-900/70 bg-red-950/50 text-red-300'
-                  : 'border-red-200 bg-red-50 text-red-700'
-              }`}>
-                {uploadError}
-              </div>
-            )}
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <p className="label">Detailed comparison</p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {visibleDatasets.find(d => d.id === selectedDataset)?.name || selectedDataset} · {methods.find(m => m.id === selectedMethod)?.name || selectedMethod}
+              </p>
+            </div>
 
-            {datasetPreview && (
-              <div className={`mt-4 rounded-2xl border p-4 md:p-5 ${
-                darkMode ? 'border-white/10 bg-white/5' : 'border-white/70 bg-white/85'
-              }`}>
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h5 className={`text-base font-semibold ${
-                        darkMode ? 'text-white' : 'text-gray-900'
-                      }`}>
-                        Column mapping
-                      </h5>
-                      <span className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
-                        darkMode ? 'bg-teal-400/10 text-teal-300' : 'bg-teal-100 text-teal-700'
-                      }`}>
-                        {datasetPreview.totalRows} rows detected
-                      </span>
-                    </div>
-                    <p className={`mt-2 text-sm ${
-                      darkMode ? 'text-gray-400' : 'text-gray-500'
-                    }`}>
-                      Pick the target column, then leave the useful feature columns checked. Columns marked as categorical will be encoded automatically during training.
-                    </p>
-                  </div>
-
-                  <div className="w-full lg:w-64">
-                    <label className={`mb-2 block text-xs font-semibold uppercase tracking-[0.2em] ${
-                      darkMode ? 'text-teal-300/80' : 'text-teal-700/80'
-                    }`}>
-                      Target column
-                    </label>
-                    <select
-                      value={selectedTargetColumn}
-                      onChange={handleTargetChange}
-                      className={`w-full rounded-xl border px-3 py-2.5 text-sm ${
-                        darkMode
-                          ? 'border-gray-700 bg-gray-950 text-gray-100'
-                          : 'border-gray-200 bg-white text-gray-900'
-                      }`}
-                    >
-                      {datasetPreview.columns.map(column => (
-                        <option key={column.name} value={column.name}>
-                          {column.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {datasetPreview.columns.map(column => {
-                    const isTarget = column.name === selectedTargetColumn
-                    const isSelectedFeature = selectedFeatureColumns.includes(column.name)
-
-                    return (
-                      <button
-                        key={column.name}
-                        type="button"
-                        onClick={() => {
-                          if (!isTarget) {
-                            toggleFeatureColumn(column.name)
-                          }
-                        }}
-                        className={`rounded-2xl border p-4 text-left transition-colors ${
-                          isTarget
-                            ? darkMode
-                              ? 'border-amber-500/60 bg-amber-500/10'
-                              : 'border-amber-300 bg-amber-50'
-                            : isSelectedFeature
-                              ? darkMode
-                                ? 'border-teal-500/60 bg-teal-500/10'
-                                : 'border-teal-300 bg-teal-50'
-                              : darkMode
-                                ? 'border-gray-800 bg-gray-950 hover:border-gray-700'
-                                : 'border-gray-200 bg-white hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className={`font-medium ${
-                              darkMode ? 'text-gray-100' : 'text-gray-900'
-                            }`}>
-                              {column.name}
-                            </div>
-                            <p className={`mt-2 text-xs uppercase tracking-[0.2em] ${
-                              darkMode ? 'text-gray-500' : 'text-gray-400'
-                            }`}>
-                              {column.kind}
-                            </p>
-                          </div>
-                          <span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
-                            isTarget
-                              ? darkMode ? 'bg-amber-400/10 text-amber-300' : 'bg-amber-100 text-amber-700'
-                              : isSelectedFeature
-                                ? darkMode ? 'bg-teal-400/10 text-teal-300' : 'bg-teal-100 text-teal-700'
-                                : darkMode ? 'bg-gray-800 text-gray-400' : 'bg-gray-100 text-gray-500'
-                          }`}>
-                            {isTarget ? 'target' : isSelectedFeature ? 'feature' : 'ignored'}
-                          </span>
-                        </div>
-                        <p className={`mt-3 text-sm ${
-                          darkMode ? 'text-gray-400' : 'text-gray-500'
-                        }`}>
-                          {column.uniqueValues} unique values
-                        </p>
-                      </button>
-                    )
-                  })}
-                </div>
-
-                <div className="mt-4 overflow-x-auto rounded-2xl border">
-                  <table className={`min-w-full text-sm ${
-                    darkMode ? 'border-gray-800 bg-gray-950' : 'border-gray-200 bg-white'
-                  }`}>
-                    <thead>
-                      <tr className={darkMode ? 'text-gray-300' : 'text-gray-700'}>
-                        {datasetPreview.columns.map(column => (
-                          <th key={column.name} className="border-b px-3 py-2 text-left font-semibold">
-                            {column.name}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {datasetPreview.sampleRows.map((row, rowIndex) => (
-                        <tr key={rowIndex} className={darkMode ? 'border-t border-gray-800' : 'border-t border-gray-200'}>
-                          {datasetPreview.columns.map(column => (
-                            <td key={`${rowIndex}-${column.name}`} className={`px-3 py-2 ${
-                              darkMode ? 'text-gray-300' : 'text-gray-600'
-                            }`}>
-                              {row[column.name]}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <p className={`text-sm ${
-                    darkMode ? 'text-gray-400' : 'text-gray-500'
-                  }`}>
-                    {selectedFeatureColumns.length} feature columns selected.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={importConfiguredDataset}
-                    disabled={uploading}
-                    className={`rounded-2xl px-4 py-3 text-sm font-semibold transition-all ${
-                      uploading
-                        ? darkMode
-                          ? 'cursor-not-allowed bg-gray-800 text-gray-500'
-                          : 'cursor-not-allowed bg-gray-100 text-gray-400'
-                        : darkMode
-                          ? 'bg-white text-gray-950 hover:-translate-y-0.5'
-                          : 'bg-gray-900 text-white hover:-translate-y-0.5'
-                    }`}
-                  >
-                    {uploading ? 'Importing...' : 'Import dataset with selected mapping'}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {uploadSummary && (
-              <div className={`mt-4 rounded-xl border px-4 py-3 ${
-                darkMode
-                  ? 'border-teal-800/80 bg-teal-950/40 text-teal-100'
-                  : 'border-teal-200 bg-white/90 text-teal-900'
-              }`}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold">{uploadSummary.dataset.name}</span>
-                  <span className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
-                    darkMode ? 'bg-teal-400/10 text-teal-300' : 'bg-teal-100 text-teal-700'
-                  }`}>
-                    Ready
-                  </span>
-                </div>
-                <p className={`mt-2 text-sm ${
-                  darkMode ? 'text-gray-300' : 'text-gray-600'
-                }`}>
-                  {uploadSummary.rows} rows, {uploadSummary.features} features, {uploadSummary.classes.length} classes.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {visibleDatasets.map(dataset => (
-            <button
-              key={dataset.id}
-              onClick={() => setSelectedDataset(dataset.id)}
-              className={`text-left p-4 rounded-xl border transition-colors ${
-                selectedDataset === dataset.id
-                  ? darkMode
-                    ? 'border-teal-500/70 bg-teal-500/10'
-                    : 'border-teal-500 bg-teal-50'
-                  : darkMode
-                    ? 'border-gray-700 hover:border-gray-600 bg-gray-900'
-                    : 'border-gray-200 hover:border-gray-300 bg-white'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <div className={`w-5 h-5 rounded-full border flex items-center justify-center flex-shrink-0 ${
-                  selectedDataset === dataset.id
-                    ? 'border-teal-500'
-                    : darkMode
-                      ? 'border-gray-500'
-                      : 'border-gray-300'
-                }`}>
-                  {selectedDataset === dataset.id && (
-                    <div className="w-2.5 h-2.5 rounded-full bg-teal-500" />
-                  )}
-                </div>
-                <div className={`font-medium ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>
-                  {dataset.name}
-                </div>
-                {dataset.id.startsWith('custom_') && (
-                  <span className={`ml-auto rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
-                    darkMode ? 'bg-teal-400/10 text-teal-300' : 'bg-teal-100 text-teal-700'
-                  }`}>
-                    Uploaded
-                  </span>
-                )}
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Models Selection */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-3">
-          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold ${
-            darkMode ? 'bg-teal-900/40 text-teal-300' : 'bg-teal-100 text-teal-700'
-          }`}>2</div>
-          <h3 className={`text-sm font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Select ML Models (min. 2)</h3>
-        </div>
-        <p className={`text-sm mb-4 ml-8 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-          Select multiple models to train and fuse their predictions.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {models.map(model => (
-            <button
-              key={model.id}
-              onClick={() => toggleModel(model.id)}
-              className={`text-left p-4 rounded-xl border transition-colors ${
-                selectedModels.includes(model.id)
-                  ? darkMode
-                    ? 'border-teal-500/70 bg-teal-500/10'
-                    : 'border-teal-500 bg-teal-50'
-                  : darkMode
-                    ? 'border-gray-700 hover:border-gray-600 bg-gray-900'
-                    : 'border-gray-200 hover:border-gray-300 bg-white'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <div className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${
-                  selectedModels.includes(model.id)
-                    ? 'border-teal-500 bg-teal-500'
-                    : darkMode
-                      ? 'border-gray-500'
-                      : 'border-gray-300'
-                }`}>
-                  {selectedModels.includes(model.id) && (
-                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                  )}
-                </div>
-                <div className={`font-medium ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>
-                  {model.name}
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-        {selectedModels.length > 0 && (
-          <p className={`text-sm mt-3 ml-8 ${darkMode ? 'text-teal-400' : 'text-teal-600'}`}>
-            {selectedModels.length} model{selectedModels.length !== 1 ? 's' : ''} selected
-          </p>
-        )}
-      </div>
-
-      {/* Fusion Method Selection */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-3">
-          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold ${
-            darkMode ? 'bg-teal-900/40 text-teal-300' : 'bg-teal-100 text-teal-700'
-          }`}>3</div>
-          <h3 className={`text-sm font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Select Fusion Method</h3>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {methods.map(method => (
-            <button
-              key={method.id}
-              onClick={() => setSelectedMethod(method.id)}
-              className={`text-left p-4 rounded-xl border transition-colors ${
-                selectedMethod === method.id
-                  ? darkMode
-                    ? 'border-teal-500/70 bg-teal-500/10'
-                    : 'border-teal-500 bg-teal-50'
-                  : darkMode
-                    ? 'border-gray-700 hover:border-gray-600 bg-gray-900'
-                    : 'border-gray-200 hover:border-gray-300 bg-white'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                <div className={`w-5 h-5 rounded-full border flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                  selectedMethod === method.id
-                    ? 'border-teal-500'
-                    : darkMode
-                      ? 'border-gray-500'
-                      : 'border-gray-300'
-                }`}>
-                  {selectedMethod === method.id && (
-                    <div className="w-2.5 h-2.5 rounded-full bg-teal-500" />
-                  )}
-                </div>
-                <div>
-                  <div className={`font-medium ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>
-                    {method.name}
-                  </div>
-                  <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                    {method.description}
-                  </p>
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Run Button */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-3">
-          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold ${
-            darkMode ? 'bg-teal-900/40 text-teal-300' : 'bg-teal-100 text-teal-700'
-          }`}>4</div>
-          <h3 className={`text-sm font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Run ML Fusion</h3>
-        </div>
-        <button
-          onClick={runFusion}
-          disabled={loading || selectedModels.length < 2}
-          className={`w-full py-3.5 text-base rounded-xl font-medium shadow-sm hover:shadow transition-all ${
-            loading || selectedModels.length < 2
-              ? darkMode
-                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              : 'btn btn-primary'
-          }`}
-        >
-          {loading ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              Training & Fusing...
-            </span>
-          ) : (
-            'Run ML Fusion Pipeline'
-          )}
-        </button>
-      </div>
-
-      {/* Error Display */}
-      {error && (
-        <div className={`px-4 py-3 rounded-lg mb-6 ${
-          darkMode
-            ? 'bg-red-900/30 border border-red-800 text-red-400'
-            : 'bg-red-50 border border-red-200 text-red-700'
-        }`}>
-          <div className="flex items-center gap-2">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            {error}
-          </div>
-        </div>
-      )}
-
-      {/* Results Display (simple) */}
-      {Array.isArray(results) && results.length > 0 && (
-        <div className={`rounded-2xl border overflow-hidden ${
-          darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'
-        }`}>
-          <div className={`px-6 py-4 border-b ${
-            darkMode ? 'border-gray-800' : 'border-gray-200'
-          }`}>
-            <h3 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-              Results
-            </h3>
-            <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              Dataset: {visibleDatasets.find(d => d.id === selectedDataset)?.name || selectedDataset} • Fusion: {methods.find(m => m.id === selectedMethod)?.name || selectedMethod}
-            </p>
-          </div>
-
-          <div className="p-6">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto rounded-xl border" style={{ borderColor: 'var(--line)' }}>
+              <table className="w-full text-sm" style={{ background: 'var(--bg-elevated)' }}>
                 <thead>
-                  <tr className={darkMode ? 'text-gray-300' : 'text-gray-700'}>
-                    <th className="text-left font-semibold pb-2">Model</th>
-                    <th className="text-left font-semibold pb-2">Accuracy</th>
-                    <th className="text-left font-semibold pb-2">Precision</th>
-                    <th className="text-left font-semibold pb-2">Recall</th>
-                    <th className="text-left font-semibold pb-2">F1</th>
-                    <th className="text-left font-semibold pb-2">ROC AUC</th>
-                    <th className="text-left font-semibold pb-2">Conflict</th>
+                  <tr style={{ color: 'var(--text-muted)', background: 'var(--bg-sunken)' }}>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Model</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Accuracy</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Precision</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Recall</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">F1</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">ROC AUC</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Conflict</th>
                   </tr>
                 </thead>
                 <tbody>
                   {results.map((r, idx) => {
                     const isFusion = r.kind === 'fusion'
-                    const modelName = isFusion
+                    const name = isFusion
                       ? `Fusion (${methods.find(m => m.id === r.fusion_method)?.name || r.fusion_method})`
-                      : (models.find(m => m.id === r.model_id)?.name || r.model_id || 'Model')
-
-                    const accText = formatPercentMetric(r.accuracy)
-                    const precisionText = formatPercentMetric(r.precision)
-                    const recallText = formatPercentMetric(r.recall)
-                    const f1Text = formatPercentMetric(r.f1_score)
-                    const rocText = formatPercentMetric(r.roc_auc)
-                    const conflictText = formatDecimalMetric(r.conflict)
-
+                      : (models.find(m => m.id === r.model_id)?.name || r.model_id)
                     return (
                       <tr
                         key={`${r.kind}-${r.model_id ?? 'fusion'}-${idx}`}
-                        className={`${darkMode ? 'border-t border-gray-800' : 'border-t border-gray-200'} ${isFusion ? 'font-semibold' : ''}`}
+                        className="border-t"
+                        style={{
+                          borderColor: 'var(--line)',
+                          background: isFusion ? 'var(--accent-soft)' : 'transparent',
+                        }}
                       >
-                        <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'} ${isFusion ? 'font-semibold' : ''}`}>
-                          {modelName}
+                        <td className="px-4 py-3" style={{ color: 'var(--text-strong)', fontWeight: isFusion ? 700 : 400 }}>
+                          <div className="flex items-center gap-2">
+                            {isFusion && <span className="inline-block h-2 w-2 rounded-full" style={{ background: 'var(--accent)' }} />}
+                            {name}
+                          </div>
                         </td>
-                        <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-                          {accText}
-                        </td>
-                        <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-                          {precisionText}
-                        </td>
-                        <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-                          {recallText}
-                        </td>
-                        <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-                          {f1Text}
-                        </td>
-                        <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-                          {rocText}
-                        </td>
-                        <td className={`py-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
-                          {conflictText}
-                        </td>
+                        <td className="px-4 py-3 mono" style={{ fontWeight: isFusion ? 700 : 400, color: isFusion ? 'var(--accent-strong)' : 'var(--text)' }}>{fmtPct(r.accuracy)}</td>
+                        <td className="px-4 py-3 mono">{fmtPct(r.precision)}</td>
+                        <td className="px-4 py-3 mono">{fmtPct(r.recall)}</td>
+                        <td className="px-4 py-3 mono">{fmtPct(r.f1_score)}</td>
+                        <td className="px-4 py-3 mono">{fmtPct(r.roc_auc)}</td>
+                        <td className="px-4 py-3 mono">{fmtDec(r.conflict)}</td>
                       </tr>
                     )
                   })}
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
-      )}
+          </section>
+        )
+      })()}
     </div>
   )
 }
