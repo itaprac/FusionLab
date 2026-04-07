@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useNavigate, useOutletContext } from 'react-router-dom'
+import { useLanguage } from '../contexts/LanguageContext'
 
 const CFG = {
   datasetId: 'digits',
@@ -9,7 +11,10 @@ const CFG = {
   fusionMethodName: 'Dempster-Shafer Theory (DST)',
 }
 
-function ExampleMLFusion({ darkMode, onTryIt }) {
+function ExampleMLFusion() {
+  const { darkMode } = useOutletContext()
+  const navigate = useNavigate()
+  const { t } = useLanguage()
   const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -19,7 +24,17 @@ function ExampleMLFusion({ darkMode, onTryIt }) {
     const run = async () => {
       setLoading(true); setError(null); setResults(null)
       try {
-        const r = await fetch('/api/ml/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ datasetId: CFG.datasetId, models: CFG.models, fusionMethod: CFG.fusionMethod }) })
+        const r = await fetch('/api/ml/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            datasetId: CFG.datasetId,
+            models: CFG.models.map(id => ({ id, params: {} })),
+            fusionMethod: CFG.fusionMethod,
+            useCrossValidation: false,
+            cvFolds: 5,
+          }),
+        })
         const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'ML Fusion failed')
         if (!cancelled) setResults(d.results)
       } catch (e) { if (!cancelled) setError(e.message) }
@@ -215,8 +230,8 @@ function ExampleMLFusion({ darkMode, onTryIt }) {
             and compare Dempster-Shafer against PCR5 or PCR6.
           </p>
         </div>
-        <button onClick={onTryIt} disabled={typeof onTryIt !== 'function'} className="btn btn-primary shrink-0">
-          Open ML Fusion
+        <button type="button" onClick={() => navigate('/ml')} className="btn btn-primary shrink-0">
+          {t('exML.try')}
         </button>
       </section>
     </div>

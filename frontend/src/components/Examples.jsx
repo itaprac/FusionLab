@@ -1,54 +1,48 @@
-function Examples({ onOpenCalculator, onOpenMLFusion }) {
+import { useNavigate } from 'react-router-dom'
+import { useLanguage } from '../contexts/LanguageContext'
+
+function Examples() {
+  const navigate = useNavigate()
+  const { t } = useLanguage()
+
   return (
     <div className="space-y-12">
       <div className="max-w-3xl">
-        <p className="label">Guided scenarios</p>
+        <p className="label">{t('examples.badge')}</p>
         <h1 className="mt-3 text-2xl font-semibold tracking-[-0.03em]" style={{ color: 'var(--text-strong)' }}>
-          Examples
+          {t('examples.title')}
         </h1>
-        <p className="mt-3 text-sm leading-7" style={{ color: 'var(--text)' }}>
-          Choose a guided scenario to see fusion in action before configuring your own inputs.
-        </p>
+        <p className="mt-3 text-sm leading-7" style={{ color: 'var(--text)' }}>{t('examples.intro')}</p>
       </div>
 
       <div className="space-y-6">
         <button
           type="button"
-          onClick={onOpenCalculator}
+          onClick={() => navigate('/examples/calculator')}
           className="group block w-full border-t py-6 text-left"
           style={{ borderColor: 'var(--line)' }}
         >
           <h2 className="text-base font-semibold tracking-[-0.01em]" style={{ color: 'var(--text-strong)' }}>
-            Avalanche Hazard Assessment
+            {t('examples.ava.title')}
           </h2>
-          <p className="mt-2 max-w-lg text-sm leading-7" style={{ color: 'var(--text)' }}>
-            Fuse weather conditions and field observations to estimate avalanche danger level using Dempster-Shafer theory.
-          </p>
-          <span
-            className="mt-3 inline-block text-sm font-semibold transition-colors"
-            style={{ color: 'var(--accent-strong)' }}
-          >
-            Open example &rarr;
+          <p className="mt-2 max-w-lg text-sm leading-7" style={{ color: 'var(--text)' }}>{t('examples.ava.body')}</p>
+          <span className="mt-3 inline-block text-sm font-semibold transition-colors" style={{ color: 'var(--accent-strong)' }}>
+            {t('examples.ava.link')}
           </span>
         </button>
 
         <button
           type="button"
-          onClick={onOpenMLFusion}
+          onClick={() => navigate('/examples/ml')}
           className="group block w-full border-t py-6 text-left"
           style={{ borderColor: 'var(--line)' }}
         >
           <h2 className="text-base font-semibold tracking-[-0.01em]" style={{ color: 'var(--text-strong)' }}>
-            Handwritten Digit Classification
+            {t('examples.digits.title')}
           </h2>
-          <p className="mt-2 max-w-lg text-sm leading-7" style={{ color: 'var(--text)' }}>
-            Train SVM, Random Forest, and Logistic Regression on digits, then fuse their outputs to compare against each model.
-          </p>
-          <span
-            className="mt-3 inline-block text-sm font-semibold transition-colors"
-            style={{ color: 'var(--accent-strong)' }}
-          >
-            Open example &rarr;
+          <p className="mt-2 max-w-lg text-sm leading-7" style={{ color: 'var(--text)' }}>{t('examples.digits.body')}</p>
+          <span className="mt-3 inline-block text-sm font-semibold transition-colors" style={{ color: 'var(--accent-strong)' }}>
+            {t('examples.digits.link')}
           </span>
         </button>
       </div>

@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
 from pybelief import dempster
-from typing import Any, Union
+from typing import Any, Optional, Union
 from pybelief.core.belief_mass import BeliefMass
 from pybelief.fusion.dempster import combine_multiple as dempster_fusion
 from pybelief.fusion.pcr import combine_multiple as pcr5_fusion, combine_multiple_pcr6 as pcr6_fusion
@@ -19,12 +19,13 @@ from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import (
     accuracy_score,
+    confusion_matrix,
     f1_score,
     precision_score,
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold, cross_val_predict, train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, LabelEncoder, OneHotEncoder
@@ -64,6 +65,7 @@ from models import (
     Classifiers,
     GetClassifiersResponse,
     ClassifierConfig,
+    ParamSpec,
     MLFusionRequest,
     MLFusionResponse,
     MLFusionResult,
@@ -522,17 +524,59 @@ async def upload_dataset(
 
 
 #---------------Pobranie dostępnych modeli-----------------
-CLASSIFIERS = [
-    Classifiers(id="svm", name="Support Vector Machine (SVM)"),
-    Classifiers(id="knn", name="K-Nearest Neighbors (KNN)"),
-    Classifiers(id="naive_bayes", name="Naive Bayes"),
-    Classifiers(id="rf", name="Random Forest"),
-    Classifiers(id="gradient_boosting", name="Gradient Boosting"),
-    Classifiers(id="logistic_regression", name="Logistic Regression"),
-    Classifiers(id="decision_tree", name="Decision Tree"),
-    Classifiers(id="extra_trees", name="Extra Trees"),
-    Classifiers(id="mlp", name="MLP Neural Network"),
-]
+def _classifier_param_schemas() -> dict[str, list[ParamSpec]]:
+    return {
+        "svm": [
+            ParamSpec(key="C", label="C", kind="number", default=1.0, min=1e-4, max=1000.0, step=0.1),
+            ParamSpec(key="kernel", label="Kernel", kind="select", default="rbf", options=["rbf", "linear", "poly"]),
+        ],
+        "knn": [
+            ParamSpec(key="n_neighbors", label="n_neighbors", kind="number", default=5, min=1, max=50, step=1),
+        ],
+        "naive_bayes": [
+            ParamSpec(key="var_smoothing", label="var_smoothing", kind="number", default=1e-9, min=1e-12, max=1.0, step=1e-10),
+        ],
+        "rf": [
+            ParamSpec(key="n_estimators", label="n_estimators", kind="number", default=100, min=10, max=500, step=10),
+            ParamSpec(key="max_depth", label="max_depth", kind="number", default=0, min=0, max=50, step=1),
+        ],
+        "gradient_boosting": [
+            ParamSpec(key="n_estimators", label="n_estimators", kind="number", default=100, min=10, max=500, step=10),
+            ParamSpec(key="learning_rate", label="learning_rate", kind="number", default=0.1, min=0.01, max=1.0, step=0.01),
+        ],
+        "logistic_regression": [
+            ParamSpec(key="C", label="C", kind="number", default=1.0, min=1e-4, max=1000.0, step=0.1),
+            ParamSpec(key="max_iter", label="max_iter", kind="number", default=2000, min=100, max=5000, step=100),
+        ],
+        "decision_tree": [
+            ParamSpec(key="max_depth", label="max_depth", kind="number", default=0, min=0, max=50, step=1),
+        ],
+        "extra_trees": [
+            ParamSpec(key="n_estimators", label="n_estimators", kind="number", default=200, min=10, max=500, step=10),
+        ],
+        "mlp": [
+            ParamSpec(key="hidden_layer_1", label="Hidden units (layer 1)", kind="number", default=64, min=8, max=256, step=8),
+            ParamSpec(key="hidden_layer_2", label="Hidden units (layer 2)", kind="number", default=32, min=0, max=256, step=8),
+            ParamSpec(key="max_iter", label="max_iter", kind="number", default=400, min=50, max=2000, step=50),
+        ],
+    }
+
+
+def _classifier_registry() -> list[Classifiers]:
+    schemas = _classifier_param_schemas()
+    meta = [
+        ("svm", "Support Vector Machine (SVM)"),
+        ("knn", "K-Nearest Neighbors (KNN)"),
+        ("naive_bayes", "Naive Bayes"),
+        ("rf", "Random Forest"),
+        ("gradient_boosting", "Gradient Boosting"),
+        ("logistic_regression", "Logistic Regression"),
+        ("decision_tree", "Decision Tree"),
+        ("extra_trees", "Extra Trees"),
+        ("mlp", "MLP Neural Network"),
+    ]
+    return [Classifiers(id=i, name=n, param_schema=schemas.get(i, [])) for i, n in meta]
+
 
 @app.get("/ml/models", response_model=GetClassifiersResponse)
 def get_classifiers() -> GetClassifiersResponse:
@@ -541,7 +585,7 @@ def get_classifiers() -> GetClassifiersResponse:
     Returns:
         GetClassifiersResponse: A list of supported classifiers with descriptions.
     """
-    return GetClassifiersResponse(classifiers=CLASSIFIERS)
+    return GetClassifiersResponse(classifiers=_classifier_registry())
 
 #---------------Fuzja w ML-----------------
 #funkcje pomocnicze
@@ -642,62 +686,93 @@ def build_uploaded_preprocessor(feature_columns: List[str], feature_types: dict[
 
     return ColumnTransformer(transformers=transformers, sparse_threshold=0)
 
-def build_classifier(model_id: str):
-    """Tworzy model z domyślnymi parametrami na podstawie ID.
+def build_classifier(model_id: str, params: Optional[dict[str, Any]] = None):
+    """Build sklearn model / pipeline; optional `params` override defaults (validated per model)."""
+    p = params or {}
 
-    Args:
-        model_id: ID modelu
-
-    Returns:
-        Gotowy model (Pipeline lub classifier)
-    """
     if model_id == "svm":
+        kw: dict[str, Any] = {"probability": True, "kernel": "rbf", "random_state": 42, "C": 1.0}
+        if "C" in p:
+            kw["C"] = max(1e-4, float(p["C"]))
+        if "kernel" in p and p["kernel"] in ("rbf", "linear", "poly"):
+            kw["kernel"] = p["kernel"]
         return Pipeline([
             ("scaler", StandardScaler()),
-            ("clf", SVC(probability=True, kernel="rbf", random_state=42))
+            ("clf", SVC(**kw)),
         ])
 
     if model_id == "knn":
+        n_neighbors = int(p.get("n_neighbors", 5))
+        n_neighbors = max(1, min(200, n_neighbors))
         return Pipeline([
             ("scaler", StandardScaler()),
-            ("clf", KNeighborsClassifier(n_neighbors=5))
+            ("clf", KNeighborsClassifier(n_neighbors=n_neighbors)),
         ])
 
     if model_id == "naive_bayes":
-        return GaussianNB()
+        vs = float(p.get("var_smoothing", 1e-9))
+        vs = max(1e-12, min(1.0, vs))
+        return GaussianNB(var_smoothing=vs)
 
     if model_id == "gradient_boosting":
-        return GradientBoostingClassifier(n_estimators=100, random_state=42)
+        ne = int(p.get("n_estimators", 100))
+        ne = max(10, min(500, ne))
+        lr = float(p.get("learning_rate", 0.1))
+        lr = max(0.01, min(1.0, lr))
+        return GradientBoostingClassifier(n_estimators=ne, learning_rate=lr, random_state=42)
 
     if model_id == "rf":
+        ne = int(p.get("n_estimators", 100))
+        ne = max(10, min(500, ne))
+        md_raw = int(p.get("max_depth", 0))
+        md: Optional[int] = None if md_raw <= 0 else max(1, min(100, md_raw))
         return Pipeline([
             ("scaler", StandardScaler()),
-            ("clf", RandomForestClassifier(n_estimators=100, random_state=42))
+            ("clf", RandomForestClassifier(n_estimators=ne, max_depth=md, random_state=42)),
         ])
 
     if model_id == "logistic_regression":
+        C = float(p.get("C", 1.0))
+        C = max(1e-4, min(1000.0, C))
+        mi = int(p.get("max_iter", 2000))
+        mi = max(100, min(10000, mi))
         return Pipeline([
             ("scaler", StandardScaler()),
-            ("clf", LogisticRegression(max_iter=2000, random_state=42))
+            ("clf", LogisticRegression(C=C, max_iter=mi, random_state=42)),
         ])
 
     if model_id == "decision_tree":
-        return DecisionTreeClassifier(random_state=42)
+        md_raw = int(p.get("max_depth", 0))
+        md: Optional[int] = None if md_raw <= 0 else max(1, min(100, md_raw))
+        return DecisionTreeClassifier(max_depth=md, random_state=42)
 
     if model_id == "extra_trees":
-        return ExtraTreesClassifier(n_estimators=200, random_state=42)
+        ne = int(p.get("n_estimators", 200))
+        ne = max(10, min(500, ne))
+        return ExtraTreesClassifier(n_estimators=ne, random_state=42)
 
     if model_id == "mlp":
+        h1 = int(p.get("hidden_layer_1", 64))
+        h2 = int(p.get("hidden_layer_2", 32))
+        h1 = max(8, min(512, h1))
+        h2 = max(0, min(512, h2))
+        hidden = (h1,) if h2 <= 0 else (h1, h2)
+        mi = int(p.get("max_iter", 400))
+        mi = max(50, min(5000, mi))
         return Pipeline([
             ("scaler", StandardScaler()),
-            ("clf", MLPClassifier(hidden_layer_sizes=(64, 32), max_iter=400, random_state=42))
+            ("clf", MLPClassifier(hidden_layer_sizes=hidden, max_iter=mi, random_state=42)),
         ])
 
     raise HTTPException(status_code=400, detail=f"Unknown classifier: {model_id}")
 
 
-def build_training_model(model_id: str, preprocessor: ColumnTransformer | None = None):
-    model = build_classifier(model_id)
+def build_training_model(
+    model_id: str,
+    preprocessor: ColumnTransformer | None = None,
+    params: Optional[dict[str, Any]] = None,
+):
+    model = build_classifier(model_id, params)
     if preprocessor is None:
         return model
 
@@ -859,84 +934,154 @@ def _build_fusion_sample_analysis(
     )
 
 
+def _parse_model_configs_json(raw: Any) -> list[ClassifierConfig]:
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(status_code=400, detail="models must be a non-empty JSON array.")
+    out: list[ClassifierConfig] = []
+    for item in raw:
+        if isinstance(item, str):
+            out.append(ClassifierConfig(id=item, params={}))
+        elif isinstance(item, dict) and "id" in item:
+            out.append(ClassifierConfig(**item))
+        else:
+            raise HTTPException(status_code=400, detail="Each model must be a string id or {id, params}.")
+    return out
+
+
 def execute_ml_fusion(
     X: np.ndarray,
     y: np.ndarray,
-    model_ids: List[str],
+    model_configs: List[ClassifierConfig],
     fusion_method: str,
     preprocessor: ColumnTransformer | None = None,
+    use_cross_validation: bool = False,
+    cv_folds: int = 5,
 ) -> MLFusionResponse:
     if issparse(X):
         X = X.toarray()
 
     y = np.asarray(y)
 
+    model_ids = [c.id for c in model_configs]
+    params_map = {c.id: c.params for c in model_configs}
+
     le = LabelEncoder()
     y_encoded = le.fit_transform(y)
     class_labels = [str(index) for index in range(len(le.classes_))]
     label_lookup = {label: index for index, label in enumerate(class_labels)}
+    class_labels_human = [str(c) for c in le.classes_]
 
     row_indices = np.arange(X.shape[0], dtype=int)
-    try:
-        X_train, X_test, y_train, y_test, _idx_train, idx_test = train_test_split(
-            X,
-            y_encoded,
-            row_indices,
-            test_size=0.25,
-            random_state=42,
-            stratify=y_encoded,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"Dataset cannot be split for training: {str(exc)}") from exc
+    n_samples = X.shape[0]
 
-    bbas_per_sample: List[List[BeliefMass]] = []
+    evaluation_mode = "cv_oof" if use_cross_validation else "holdout"
 
-    classifiers = []
     model_probabilities: List[np.ndarray] = []
     y_preds_rows: List[np.ndarray] = []
-    for model_id in model_ids:
-        model = build_training_model(model_id, preprocessor)
+    y_eval: np.ndarray
+    idx_eval: np.ndarray
+    per_model_results: List[MLFusionResult] = []
+
+    if use_cross_validation:
+        if n_samples < cv_folds * 2:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Need at least {cv_folds * 2} samples for {cv_folds}-fold cross-validation.",
+            )
         try:
-            model.fit(X_train, y_train)
+            cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"Model '{model_id}' could not be trained: {str(exc)}") from exc
-        classifiers.append(model)
-        model_probabilities.append(model.predict_proba(X_test))
-        y_preds_rows.append(model.predict(X_test))
+            raise HTTPException(status_code=400, detail=f"Invalid CV configuration: {exc}") from exc
+
+        for model_id in model_ids:
+            model = build_training_model(model_id, preprocessor, params_map.get(model_id, {}))
+            try:
+                proba_oof = cross_val_predict(
+                    model, X, y_encoded, cv=cv, method="predict_proba", n_jobs=1
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cross-validation failed for model '{model_id}': {exc}",
+                ) from exc
+            model_probabilities.append(proba_oof)
+            y_preds_rows.append(np.argmax(proba_oof, axis=1))
+
+        y_eval = y_encoded
+        idx_eval = row_indices
+
+        for model_id, proba_oof, y_pred_oof in zip(model_ids, model_probabilities, y_preds_rows):
+            m = calculate_classification_metrics(y_encoded, y_pred_oof, proba_oof)
+            per_model_results.append(
+                MLFusionResult(
+                    kind="model",
+                    model_id=model_id,
+                    fusion_method=fusion_method,
+                    accuracy=m["accuracy"],
+                    precision=m["precision"],
+                    recall=m["recall"],
+                    f1_score=m["f1_score"],
+                    roc_auc=m["roc_auc"],
+                    conflict=None,
+                )
+            )
+    else:
+        try:
+            X_train, X_test, y_train, y_test, _idx_train, idx_test = train_test_split(
+                X,
+                y_encoded,
+                row_indices,
+                test_size=0.25,
+                random_state=42,
+                stratify=y_encoded,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Dataset cannot be split for training: {str(exc)}") from exc
+
+        for model_id in model_ids:
+            model = build_training_model(model_id, preprocessor, params_map.get(model_id, {}))
+            try:
+                model.fit(X_train, y_train)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400, detail=f"Model '{model_id}' could not be trained: {str(exc)}"
+                ) from exc
+            model_probabilities.append(model.predict_proba(X_test))
+            y_preds_rows.append(model.predict(X_test))
+
+        y_eval = y_test
+        idx_eval = idx_test
+
+        for model_id, model_proba, y_pred_model in zip(model_ids, model_probabilities, y_preds_rows):
+            m = calculate_classification_metrics(y_test, y_pred_model, model_proba)
+            per_model_results.append(
+                MLFusionResult(
+                    kind="model",
+                    model_id=model_id,
+                    fusion_method=fusion_method,
+                    accuracy=m["accuracy"],
+                    precision=m["precision"],
+                    recall=m["recall"],
+                    f1_score=m["f1_score"],
+                    roc_auc=m["roc_auc"],
+                    conflict=None,
+                )
+            )
 
     y_preds_matrix = np.stack(y_preds_rows, axis=0)
+    n_eval = model_probabilities[0].shape[0]
 
-    per_model_results = []
-    for model_id, model, model_proba, y_pred_model in zip(
-        model_ids, classifiers, model_probabilities, y_preds_rows
-    ):
-        model_metrics = calculate_classification_metrics(y_test, y_pred_model, model_proba)
-        per_model_results.append(
-            MLFusionResult(
-                kind="model",
-                model_id=model_id,
-                fusion_method=fusion_method,
-                accuracy=model_metrics["accuracy"],
-                precision=model_metrics["precision"],
-                recall=model_metrics["recall"],
-                f1_score=model_metrics["f1_score"],
-                roc_auc=model_metrics["roc_auc"],
-                conflict=None
-            )
-        )
-
-    for i in range(len(X_test)):
+    bbas_per_sample: List[List[BeliefMass]] = []
+    for i in range(n_eval):
         sample_bbas = []
-
         for model_proba in model_probabilities:
             proba = model_proba[i]
             bba = proba_to_bba(proba, class_labels)
             sample_bbas.append(bba)
-
         bbas_per_sample.append(sample_bbas)
 
-    y_pred = []
-    fused_scores = []
+    y_pred: List[int] = []
+    fused_scores: List[np.ndarray] = []
     total_conflict = 0.0
 
     for idx, sample_bbas in enumerate(bbas_per_sample):
@@ -971,15 +1116,15 @@ def execute_ml_fusion(
         except Exception as e:
             raise HTTPException(
                 status_code=500,
-                detail=f"Fusion error at sample {idx} with {len(sample_bbas)} models: {str(e)}"
+                detail=f"Fusion error at sample {idx} with {len(sample_bbas)} models: {str(e)}",
             )
 
     fused_metrics = calculate_classification_metrics(
-        y_test,
+        y_eval,
         np.asarray(y_pred),
         np.asarray(fused_scores) if fused_scores else None,
     )
-    avg_conflict = (total_conflict / len(X_test)) if total_conflict > 0 and len(X_test) > 0 else None
+    avg_conflict = (total_conflict / n_eval) if total_conflict > 0 and n_eval > 0 else None
 
     fused_result = MLFusionResult(
         kind="fusion",
@@ -990,39 +1135,42 @@ def execute_ml_fusion(
         recall=fused_metrics["recall"],
         f1_score=fused_metrics["f1_score"],
         roc_auc=fused_metrics["roc_auc"],
-        conflict=avg_conflict
+        conflict=avg_conflict,
     )
 
     y_fused_arr = np.asarray(y_pred, dtype=int)
     sample_analysis = _build_fusion_sample_analysis(
         le,
         model_ids,
-        y_test,
-        idx_test,
+        y_eval,
+        idx_eval,
         y_preds_matrix,
         y_fused_arr,
         per_model_results,
     )
 
-    return MLFusionResponse(results=[*per_model_results, fused_result], sample_analysis=sample_analysis)
+    n_classes = len(le.classes_)
+    cm = confusion_matrix(y_eval, y_fused_arr, labels=np.arange(n_classes, dtype=int))
+
+    return MLFusionResponse(
+        results=[*per_model_results, fused_result],
+        sample_analysis=sample_analysis,
+        evaluationMode=evaluation_mode,
+        classLabels=class_labels_human,
+        confusionMatrixFusion=cm.tolist(),
+    )
 
 @app.post("/ml/run", response_model=MLFusionResponse)
 def fuse_ml(request: MLFusionRequest):
-    """Uruchamia ML pipeline: trenuje modele, fuzja predykcji, zwraca accuracy.
-
-    Frontend wysyła:
-    {
-      "datasetId": "digits",
-      "models": ["svm", "rf", "logistic_regression"],
-      "fusionMethod": "dempster"
-    }
-    """
+    """Uruchamia ML pipeline: trenuje modele, fuzja predykcji, zwraca accuracy."""
     dataset_bundle = load_dataset(request.datasetId)
     return execute_ml_fusion(
         dataset_bundle["X"],
         dataset_bundle["y"],
         request.models,
         request.fusionMethod,
+        use_cross_validation=request.useCrossValidation,
+        cv_folds=request.cvFolds,
     )
 
 
@@ -1033,6 +1181,8 @@ async def fuse_uploaded_ml(
     feature_columns: str = Form(...),
     models: str = Form(...),
     fusion_method: str = Form(...),
+    use_cross_validation: str = Form("false"),
+    cv_folds: int = Form(5),
 ):
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Please upload a .csv file.")
@@ -1043,11 +1193,15 @@ async def fuse_uploaded_ml(
 
     parsed_feature_columns = parse_feature_columns_form(feature_columns)
     try:
-        model_ids = json.loads(models)
+        raw_models = json.loads(models)
     except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail="models must be a JSON array.") from exc
-    if not isinstance(model_ids, list) or not all(isinstance(model_id, str) for model_id in model_ids):
-        raise HTTPException(status_code=400, detail="models must be a JSON array of model IDs.")
+        raise HTTPException(status_code=400, detail="models must be valid JSON.") from exc
+    model_configs = _parse_model_configs_json(raw_models)
+
+    ucv = str(use_cross_validation).lower() in ("true", "1", "yes", "on")
+
+    if cv_folds < 2 or cv_folds > 15:
+        raise HTTPException(status_code=400, detail="cv_folds must be between 2 and 15.")
 
     _, dataset_entry, _, _, _ = prepare_uploaded_dataset(
         file.filename,
@@ -1067,4 +1221,12 @@ async def fuse_uploaded_ml(
         dataset_entry["feature_types"],
     )
 
-    return execute_ml_fusion(X, y, model_ids, fusion_method, preprocessor)
+    return execute_ml_fusion(
+        X,
+        y,
+        model_configs,
+        fusion_method,
+        preprocessor,
+        use_cross_validation=ucv,
+        cv_folds=cv_folds,
+    )

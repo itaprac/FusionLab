@@ -1,24 +1,42 @@
 import { useState } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { useLanguage } from '../contexts/LanguageContext'
 
-const NAV_LINKS = [
-  { id: 'home', label: 'Home' },
-  { id: 'calculator', label: 'Calculator' },
-  { id: 'mlfusion', label: 'ML Fusion' },
-  { id: 'examples', label: 'Examples' },
-]
+const PATHS = {
+  home: '/',
+  calculator: '/calculator',
+  mlfusion: '/ml',
+  examples: '/examples',
+  docs: '/docs',
+}
 
-function Header({ activeView, onNavigate, darkMode, onToggleDarkMode }) {
+function Header({ darkMode, onToggleDarkMode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { locale, setLocale, t } = useLanguage()
+
+  const path = location.pathname
 
   const isActive = (id) => {
-    if (id === 'examples') return String(activeView).startsWith('examples')
-    return activeView === id
+    const p = PATHS[id]
+    if (id === 'examples') return path === '/examples' || path.startsWith('/examples/')
+    if (id === 'docs') return path === '/docs'
+    return path === p
   }
 
-  const navigate = (id) => {
-    onNavigate(id)
+  const go = (id) => {
+    navigate(PATHS[id])
     setMobileOpen(false)
   }
+
+  const NAV_LINKS = [
+    { id: 'home', label: t('nav.home') },
+    { id: 'calculator', label: t('nav.calculator') },
+    { id: 'mlfusion', label: t('nav.ml') },
+    { id: 'examples', label: t('nav.examples') },
+    { id: 'docs', label: t('nav.docs') },
+  ]
 
   return (
     <header
@@ -29,10 +47,7 @@ function Header({ activeView, onNavigate, darkMode, onToggleDarkMode }) {
       }}
     >
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3 sm:px-8 lg:px-12">
-        <button
-          onClick={() => navigate('home')}
-          className="flex items-center gap-2"
-        >
+        <button type="button" onClick={() => go('home')} className="flex items-center gap-2">
           <svg className="h-5 w-5" style={{ color: 'var(--accent)' }} fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
@@ -45,7 +60,8 @@ function Header({ activeView, onNavigate, darkMode, onToggleDarkMode }) {
           {NAV_LINKS.map(link => (
             <button
               key={link.id}
-              onClick={() => navigate(link.id)}
+              type="button"
+              onClick={() => go(link.id)}
               className="rounded-md px-3 py-1.5 text-sm transition-colors"
               style={{
                 color: isActive(link.id) ? 'var(--text-strong)' : 'var(--text-muted)',
@@ -58,12 +74,40 @@ function Header({ activeView, onNavigate, darkMode, onToggleDarkMode }) {
           ))}
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
+          <div className="flex items-center rounded-md border text-xs" style={{ borderColor: 'var(--line)' }}>
+            <button
+              type="button"
+              onClick={() => setLocale('en')}
+              className="px-2 py-1 transition-colors"
+              style={{
+                fontWeight: locale === 'en' ? 700 : 400,
+                color: locale === 'en' ? 'var(--text-strong)' : 'var(--text-muted)',
+                background: locale === 'en' ? 'var(--bg-sunken)' : 'transparent',
+              }}
+            >
+              {t('nav.langEn')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setLocale('pl')}
+              className="px-2 py-1 transition-colors"
+              style={{
+                fontWeight: locale === 'pl' ? 700 : 400,
+                color: locale === 'pl' ? 'var(--text-strong)' : 'var(--text-muted)',
+                background: locale === 'pl' ? 'var(--bg-sunken)' : 'transparent',
+              }}
+            >
+              {t('nav.langPl')}
+            </button>
+          </div>
+
           <button
+            type="button"
             onClick={onToggleDarkMode}
             className="flex h-8 w-8 items-center justify-center rounded-md transition-colors"
             style={{ color: 'var(--text-muted)' }}
-            title={darkMode ? 'Light mode' : 'Dark mode'}
+            title={darkMode ? t('theme.light') : t('theme.dark')}
           >
             {darkMode ? (
               <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -77,6 +121,7 @@ function Header({ activeView, onNavigate, darkMode, onToggleDarkMode }) {
           </button>
 
           <button
+            type="button"
             onClick={() => setMobileOpen(v => !v)}
             className="flex h-8 w-8 items-center justify-center rounded-md md:hidden"
             style={{ color: 'var(--text)' }}
@@ -97,7 +142,8 @@ function Header({ activeView, onNavigate, darkMode, onToggleDarkMode }) {
           {NAV_LINKS.map(link => (
             <button
               key={link.id}
-              onClick={() => navigate(link.id)}
+              type="button"
+              onClick={() => go(link.id)}
               className="block w-full py-2.5 text-left text-sm transition-colors"
               style={{
                 color: isActive(link.id) ? 'var(--text-strong)' : 'var(--text-muted)',

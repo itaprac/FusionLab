@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 
 
@@ -64,22 +64,35 @@ class UploadDatasetResponse(BaseModel):
     features: int
     classes: List[str]
 
+class ParamSpec(BaseModel):
+    key: str
+    label: str
+    kind: str  # "number" | "select"
+    default: Any
+    min: Optional[float] = None
+    max: Optional[float] = None
+    step: Optional[float] = None
+    options: Optional[List[str]] = None
+
 class Classifiers(BaseModel):
     id: str
     name: str
+    param_schema: List[ParamSpec] = Field(default_factory=list)
 
 class GetClassifiersResponse(BaseModel):
     classifiers: List[Classifiers]
 
 class ClassifierConfig(BaseModel):
     id: str
-    params: Dict[str, Any]
+    params: Dict[str, Any] = Field(default_factory=dict)
 
 
 class MLFusionRequest(BaseModel):
     datasetId: str
-    models: List[str]  # Lista ID modeli, np. ['svm', 'knn']
+    models: List[ClassifierConfig]
     fusionMethod: str
+    useCrossValidation: bool = False
+    cvFolds: int = Field(default=5, ge=2, le=15)
 
 class MLFusionResult(BaseModel):
     kind: str  # 'model' | 'fusion'
@@ -90,7 +103,7 @@ class MLFusionResult(BaseModel):
     recall: float
     f1_score: float
     roc_auc: Optional[float] = None
-    conflict: Optional[float]  # None gdy fuzja 3+ modeli (konflikt kumulatywny)
+    conflict: Optional[float]  # None gdy fuzja 3+ modeli (konflikt kumulacyjny)
 
 class FusionSampleDetail(BaseModel):
     """Single test sample for inspection (labels as human-readable strings)."""
@@ -124,6 +137,9 @@ class FusionSampleAnalysis(BaseModel):
 class MLFusionResponse(BaseModel):
     results: List[MLFusionResult]
     sample_analysis: FusionSampleAnalysis
+    evaluationMode: str = "holdout"  # "holdout" | "cv_oof"
+    classLabels: List[str] = Field(default_factory=list)
+    confusionMatrixFusion: Optional[List[List[int]]] = None
 
 
 # Calculator Examples

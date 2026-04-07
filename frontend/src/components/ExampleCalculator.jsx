@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useOutletContext } from 'react-router-dom'
 import SourceCard from './SourceCard'
 import ResultCard from './ResultCard'
+import { useLanguage } from '../contexts/LanguageContext'
 
-function ExampleCalculator({ darkMode, onTryIt }) {
+function ExampleCalculator() {
+  const { darkMode } = useOutletContext()
+  const navigate = useNavigate()
+  const { t } = useLanguage()
   const methodId = 'dempster'
   const methodName = 'Dempster-Shafer Theory (DST)'
 
@@ -56,10 +61,11 @@ function ExampleCalculator({ darkMode, onTryIt }) {
   return (
     <div className="space-y-10">
       <div className="max-w-3xl">
-        <p className="label">Guided calculator example</p>
+        <p className="label">{t('exCalc.badge')}</p>
         <h1 className="mt-3 text-2xl font-semibold tracking-[-0.03em]" style={{ color: 'var(--text-strong)' }}>
-          Why using multiple sources improves decisions
+          {t('exCalc.title')}
         </h1>
+        <p className="mt-5 text-sm leading-7" style={{ color: 'var(--text-muted)' }}>{t('exCalc.intro')}</p>
         <div className="mt-5 space-y-3 text-sm leading-7" style={{ color: 'var(--text)' }}>
           <p>
             Information rarely comes from a single reliable source. In real-world decision making,
@@ -135,8 +141,12 @@ function ExampleCalculator({ darkMode, onTryIt }) {
             or switch to PCR5/PCR6 to see how different fusion rules handle the same evidence.
           </p>
         </div>
-        <button onClick={onTryIt} disabled={typeof onTryIt !== 'function'} className="btn btn-primary shrink-0">
-          Open Calculator
+        <button
+          type="button"
+          onClick={() => navigate('/calculator?example=avalanche_hazard&method=dempster')}
+          className="btn btn-primary shrink-0"
+        >
+          {t('exCalc.try')}
         </button>
       </section>
     </div>

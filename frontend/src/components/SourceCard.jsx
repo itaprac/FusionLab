@@ -1,8 +1,11 @@
+import { useLanguage } from '../contexts/LanguageContext'
+
 function SourceCard({
   source, index, canRemove, onRemove, onUpdateName,
   onAddHypothesis, onRemoveHypothesis, onUpdateHypothesis,
   darkMode, readOnly = false, description
 }) {
+  const { t } = useLanguage()
   const totalMass = source.hypotheses.reduce((sum, h) => sum + (parseFloat(h.mass) || 0), 0)
   const isOverLimit = totalMass > 1
 
@@ -29,7 +32,7 @@ function SourceCard({
           )}
         </div>
         {!readOnly && canRemove && (
-          <button onClick={onRemove} className="text-xs transition-colors" style={{ color: 'var(--text-muted)' }} title="Remove source">
+          <button type="button" onClick={onRemove} className="text-xs transition-colors" style={{ color: 'var(--text-muted)' }} title={t('source.remove')}>
             &times;
           </button>
         )}
@@ -42,8 +45,8 @@ function SourceCard({
 
         <div className="space-y-1.5">
           <div className="grid grid-cols-[1fr,5rem,1.5rem] gap-2 text-[11px] font-semibold uppercase tracking-[0.15em]" style={{ color: 'var(--text-muted)' }}>
-            <span>Hypothesis</span>
-            <span>Mass</span>
+            <span>{t('source.hypothesis')}</span>
+            <span>{t('source.mass')}</span>
             <span />
           </div>
           {source.hypotheses.map((h, idx) => (
@@ -64,8 +67,8 @@ function SourceCard({
 
         <div className="mt-3 flex items-center justify-between gap-3 border-t pt-2.5" style={{ borderColor: 'var(--line)' }}>
           {readOnly ? <div /> : (
-            <button onClick={onAddHypothesis} className="text-sm font-semibold transition-colors" style={{ color: 'var(--accent-strong)' }}>
-              + Add hypothesis
+            <button type="button" onClick={onAddHypothesis} className="text-sm font-semibold transition-colors" style={{ color: 'var(--accent-strong)' }}>
+              {t('source.addHyp')}
             </button>
           )}
           <span
