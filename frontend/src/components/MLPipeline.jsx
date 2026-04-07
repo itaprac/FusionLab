@@ -202,6 +202,10 @@ function MLPipeline() {
   const [evaluationMode, setEvaluationMode] = useState('holdout')
   const [classLabels, setClassLabels] = useState([])
   const [confusionMatrixFusion, setConfusionMatrixFusion] = useState(null)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState(null)
+  const [searchData, setSearchData] = useState(null)
+  const [searchProgress, setSearchProgress] = useState(null)
   const [useCV, setUseCV] = useState(false)
   const [cvFolds, setCvFolds] = useState(5)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -216,6 +220,10 @@ function MLPipeline() {
   const [customDataset, setCustomDataset] = useState(null)
 
   const fileInputRef = useRef(null)
+  const fusionResultsRef = useRef(null)
+  const shouldScrollToFusionResultsRef = useRef(false)
+  const fusionControlsRef = useRef(null)
+  const shouldScrollToFusionControlsRef = useRef(false)
   const visibleDatasets = customDataset ? [...datasets, customDataset.dataset] : datasets
 
   const fmtPct = (v) => {
@@ -264,6 +272,25 @@ function MLPipeline() {
       })
       .catch((e) => setError(e.message))
   }, [])
+
+  useEffect(() => {
+    if (!shouldScrollToFusionResultsRef.current || loading) return
+    if (!results || !Array.isArray(results) || results.length === 0) return
+    shouldScrollToFusionResultsRef.current = false
+    const frame = requestAnimationFrame(() => {
+      fusionResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [loading, results])
+
+  useEffect(() => {
+    if (!shouldScrollToFusionControlsRef.current) return
+    shouldScrollToFusionControlsRef.current = false
+    const frame = requestAnimationFrame(() => {
+      fusionControlsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [selectedModels, selectedMethod])
 
   const toggleModel = (id) => {
     setSelectedModels((prev) => {
@@ -397,6 +424,7 @@ function MLPipeline() {
       }
       const d = await r.json()
       if (!r.ok) throw new Error(d.detail || t('ml.err.generic'))
+      shouldScrollToFusionResultsRef.current = true
       setResults(d.results)
       setSampleAnalysis(d.sample_analysis ?? null)
       setEvaluationMode(d.evaluationMode || 'holdout')
@@ -407,6 +435,140 @@ function MLPipeline() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const runSearch = async () => {
+    if (selectedModels.length < 2) {
+      setSearchError(t('ml.err.models2'))
+      return
+    }
+    setSearchError(null)
+    setSearchData(null)
+    setError(null)
+    setResults(null)
+    setSampleAnalysis(null)
+    setClassLabels([])
+    setConfusionMatrixFusion(null)
+    setSearchProgress({ phase: 'training' })
+    setSearchLoading(true)
+    try {
+      const payloadModels = selectedModels.map((id) => ({ id, params: modelParams[id] || {} }))
+      const isCustom = customDataset?.dataset.id === selectedDataset
+      let r
+      if (isCustom) {
+        const fd = new FormData()
+        fd.append('file', customDataset.file)
+        fd.append('target_column', customDataset.targetColumn)
+        fd.append('feature_columns', JSON.stringify(customDataset.featureColumns))
+        fd.append('models', JSON.stringify(payloadModels))
+        fd.append('use_cross_validation', useCV ? 'true' : 'false')
+        fd.append('cv_folds', String(cvFolds))
+        r = await fetch('/api/ml/search-upload-stream', { method: 'POST', body: fd })
+      } else {
+        r = await fetch('/api/ml/search-stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            datasetId: selectedDataset,
+            models: payloadModels,
+            useCrossValidation: useCV,
+            cvFolds,
+          }),
+        })
+      }
+      if (!r.ok) {
+        const text = await r.text()
+        let msg = t('ml.err.generic')
+        try {
+          const d = JSON.parse(text)
+          const detail = d.detail
+          msg =
+            typeof detail === 'string'
+              ? detail
+              : Array.isArray(detail)
+                ? detail.map((x) => (typeof x === 'string' ? x : x?.msg || JSON.stringify(x))).join(' ')
+                : msg
+        } catch {
+          if (text) msg = text
+        }
+        throw new Error(msg)
+      }
+      const reader = r.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let finalData = null
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (!line.trim()) continue
+          let obj
+          try {
+            obj = JSON.parse(line)
+          } catch {
+            continue
+          }
+          if (obj.type === 'phase') {
+            setSearchProgress({ phase: obj.phase })
+          }
+          if (obj.type === 'progress') {
+            setSearchProgress({
+              phase: obj.phase || 'combinations',
+              done: obj.done,
+              total: obj.total,
+            })
+          }
+          if (obj.type === 'complete') {
+            finalData = obj.data
+          }
+          if (obj.type === 'error') {
+            throw new Error(obj.detail || t('ml.search.err'))
+          }
+        }
+      }
+      if (buffer.trim()) {
+        try {
+          const obj = JSON.parse(buffer)
+          if (obj.type === 'complete') finalData = obj.data
+          if (obj.type === 'error') throw new Error(obj.detail || t('ml.search.err'))
+        } catch (e) {
+          if (e instanceof SyntaxError) {
+            /* ignore truncated trailing chunk */
+          } else {
+            throw e
+          }
+        }
+      }
+      if (!finalData) throw new Error(t('ml.search.err'))
+      setSearchData(finalData)
+    } catch (e) {
+      setSearchError(e.message)
+    } finally {
+      setSearchLoading(false)
+      setSearchProgress(null)
+    }
+  }
+
+  const applyBestSearch = () => {
+    if (!searchData?.best) return
+    const { model_ids: bestIds, fusion_method: bestMethod } = searchData.best
+    shouldScrollToFusionControlsRef.current = true
+    setSelectedModels(bestIds)
+    setSelectedMethod(bestMethod)
+    setModelParams((prev) => {
+      const next = {}
+      for (const id of bestIds) {
+        if (prev[id]) next[id] = prev[id]
+        else {
+          const m = models.find((x) => x.id === id)
+          next[id] = defaultsFromSchema(m?.param_schema)
+        }
+      }
+      return next
+    })
   }
 
   return (
@@ -544,7 +706,13 @@ function MLPipeline() {
         )}
       </section>
 
-      <section className="border-t pt-6" style={{ borderColor: 'var(--line)' }}>
+      <section
+        ref={fusionControlsRef}
+        className="border-t pt-6 scroll-mt-24"
+        style={{ borderColor: 'var(--line)' }}
+        tabIndex={-1}
+        aria-label={t('ml.step2')}
+      >
         <div className="flex items-center gap-2 mb-1">
           <span className="mono flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold" style={{ background: 'var(--accent-soft)', color: 'var(--accent-strong)' }}>2</span>
           <p className="label" style={{ margin: 0 }}>{t('ml.step2')}</p>
@@ -644,8 +812,9 @@ function MLPipeline() {
       </section>
 
       <section className="border-t pt-6" style={{ borderColor: 'var(--line)' }}>
-        <div className="flex items-center gap-4">
-          <button type="button" onClick={runFusion} disabled={loading || selectedModels.length < 2} className="btn btn-primary">
+        <p className="mb-3 text-xs leading-relaxed max-w-2xl" style={{ color: 'var(--text-muted)' }}>{t('ml.search.hint')}</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <button type="button" onClick={runFusion} disabled={loading || searchLoading || selectedModels.length < 2} className="btn btn-primary">
             {loading ? (
               <span className="flex items-center gap-2">
                 <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -656,6 +825,22 @@ function MLPipeline() {
               </span>
             ) : t('ml.run')}
           </button>
+          <button
+            type="button"
+            onClick={runSearch}
+            disabled={loading || searchLoading || selectedModels.length < 2}
+            className="btn btn-secondary"
+          >
+            {searchLoading ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                {t('ml.searching')}
+              </span>
+            ) : t('ml.searchBtn')}
+          </button>
           {error && (
             <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--danger)' }}>
               <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -664,8 +849,119 @@ function MLPipeline() {
               {error}
             </div>
           )}
+          {searchError && (
+            <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--danger)' }}>
+              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {searchError}
+            </div>
+          )}
         </div>
+        {searchLoading && searchProgress && (
+          <div
+            className="mt-4 w-full max-w-lg rounded-lg border px-4 py-3"
+            style={{ borderColor: 'var(--line)', background: 'var(--bg-sunken)' }}
+          >
+            {searchProgress.phase === 'training' && (
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>{t('ml.search.phaseTraining')}</p>
+            )}
+            {searchProgress.phase === 'combinations' && searchProgress.total != null && (
+              <>
+                <p className="text-xs font-semibold" style={{ color: 'var(--text-strong)' }}>{t('ml.search.phaseCombinations')}</p>
+                <p className="mt-1.5 text-xs mono tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                  {searchProgress.done} / {searchProgress.total}
+                  {' · '}
+                  {Math.max(0, searchProgress.total - searchProgress.done)} {t('ml.search.left')}
+                </p>
+                <progress
+                  className="mt-2 h-2 w-full rounded overflow-hidden"
+                  value={searchProgress.done}
+                  max={Math.max(1, searchProgress.total)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+              </>
+            )}
+          </div>
+        )}
       </section>
+
+      {searchData && (
+        <section className="result-enter border-t pt-8" style={{ borderColor: 'var(--line)' }}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>{t('ml.search.title')}</h2>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              {t('ml.search.evaluated')}: <span className="mono font-semibold" style={{ color: 'var(--text-strong)' }}>{searchData.total_combinations_evaluated}</span>
+              {' · '}
+              {t('ml.evalMode')}{' '}
+              <strong style={{ color: 'var(--text-strong)' }}>
+                {searchData.evaluationMode === 'cv_oof' ? t('ml.eval.cv') : t('ml.eval.holdout')}
+              </strong>
+            </p>
+          </div>
+
+          <div className="mt-4 rounded-xl border p-4" style={{ borderColor: 'var(--line)', background: 'var(--accent-soft)' }}>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: 'var(--accent-strong)' }}>{t('ml.search.best')}</p>
+            <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{t('ml.search.models')}</p>
+                <p className="mt-0.5 text-sm font-medium" style={{ color: 'var(--text-strong)' }}>
+                  {searchData.best.model_ids.map((id) => models.find((m) => m.id === id)?.name || id).join(' + ')}
+                </p>
+                <p className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>{t('ml.search.method')}</p>
+                <p className="mt-0.5 text-sm font-medium" style={{ color: 'var(--text-strong)' }}>
+                  {methods.find((m) => m.id === searchData.best.fusion_method)?.name || searchData.best.fusion_method}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-end gap-4">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.15em]" style={{ color: 'var(--text-muted)' }}>{t('ml.table.acc')}</p>
+                  <p className="mono text-xl font-bold" style={{ color: 'var(--accent-strong)' }}>{fmtPct(searchData.best.accuracy)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.15em]" style={{ color: 'var(--text-muted)' }}>{t('ml.table.f1')}</p>
+                  <p className="mono text-xl font-bold" style={{ color: 'var(--text-strong)' }}>{fmtPct(searchData.best.f1_score)}</p>
+                </div>
+                <button type="button" onClick={applyBestSearch} className="btn btn-primary text-sm">
+                  {t('ml.search.apply')}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <h3 className="mt-6 text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: 'var(--text-muted)' }}>{t('ml.search.top')}</h3>
+          <div className="mt-2 overflow-x-auto rounded-xl border" style={{ borderColor: 'var(--line)' }}>
+            <table className="w-full min-w-[640px] text-sm" style={{ background: 'var(--bg-elevated)' }}>
+              <thead>
+                <tr style={{ color: 'var(--text-muted)', background: 'var(--bg-sunken)' }}>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em]">{t('ml.search.rank')}</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em]">{t('ml.search.models')}</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em]">{t('ml.search.method')}</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em]">{t('ml.table.acc')}</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em]">{t('ml.table.f1')}</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em]">{t('ml.table.auc')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {searchData.ranking.map((row, i) => (
+                  <tr key={`${row.fusion_method}-${row.model_ids.join('+')}-${i}`} className="border-t" style={{ borderColor: 'var(--line)' }}>
+                    <td className="px-3 py-2 mono text-xs" style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-strong)' }}>
+                      {row.model_ids.map((id) => models.find((m) => m.id === id)?.name || id).join(' + ')}
+                    </td>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--text)' }}>
+                      {methods.find((m) => m.id === row.fusion_method)?.name || row.fusion_method}
+                    </td>
+                    <td className="px-3 py-2 mono text-xs">{fmtPct(row.accuracy)}</td>
+                    <td className="px-3 py-2 mono text-xs">{fmtPct(row.f1_score)}</td>
+                    <td className="px-3 py-2 mono text-xs">{fmtPct(row.roc_auc)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {Array.isArray(results) && results.length > 0 && (() => {
         const fusionRow = results.find((r) => r.kind === 'fusion')
@@ -679,7 +975,12 @@ function MLPipeline() {
         const fusionWins = fusionAcc >= bestAcc
 
         return (
-          <section className="result-enter">
+          <section
+            ref={fusionResultsRef}
+            className="result-enter scroll-mt-24"
+            tabIndex={-1}
+            aria-label={t('ml.result.badge')}
+          >
             <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
               {t('ml.evalMode')}{' '}
               <strong style={{ color: 'var(--text-strong)' }}>

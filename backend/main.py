@@ -5,15 +5,15 @@ import os
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
 from pybelief import dempster
-from typing import Any, Optional, Union
+from itertools import combinations
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 from pybelief.core.belief_mass import BeliefMass
 from pybelief.fusion.dempster import combine_multiple as dempster_fusion
 from pybelief.fusion.pcr import combine_multiple as pcr5_fusion, combine_multiple_pcr6 as pcr6_fusion
-from typing import List
 
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
@@ -69,6 +69,9 @@ from models import (
     MLFusionRequest,
     MLFusionResponse,
     MLFusionResult,
+    MLFusionSearchRequest,
+    MLFusionSearchResponse,
+    MLFusionSearchEntry,
     FusionSampleAnalysis,
     FusionSampleDetail,
     Example,
@@ -948,7 +951,144 @@ def _parse_model_configs_json(raw: Any) -> list[ClassifierConfig]:
     return out
 
 
-def execute_ml_fusion(
+FUSION_METHODS_SEARCH = ("dempster", "pcr5", "pcr6")
+MAX_SEARCH_MODELS = 16
+MAX_SEARCH_EVALS = 250_000
+
+
+def _count_search_evaluations(n_models: int) -> int:
+    if n_models < 2:
+        return 0
+    n_subsets = 2**n_models - n_models - 1
+    return n_subsets * len(FUSION_METHODS_SEARCH)
+
+
+def _build_bbas_per_sample(
+    model_probabilities: List[np.ndarray],
+    class_labels: List[str],
+) -> List[List[BeliefMass]]:
+    n_eval = model_probabilities[0].shape[0]
+    bbas_per_sample: List[List[BeliefMass]] = []
+    for i in range(n_eval):
+        sample_bbas = []
+        for model_proba in model_probabilities:
+            proba = model_proba[i]
+            bba = proba_to_bba(proba, class_labels)
+            sample_bbas.append(bba)
+        bbas_per_sample.append(sample_bbas)
+    return bbas_per_sample
+
+
+def _average_singleton_scores_from_bbas(
+    sample_bbas: List[BeliefMass],
+    class_labels: List[str],
+) -> np.ndarray:
+    """
+    Fallback when Dempster's rule hits total conflict (K=1): singleton masses are
+    averaged across sources and renormalized. DST is undefined in that case;
+    this keeps the ML pipeline well-defined.
+    """
+    n = len(sample_bbas)
+    scores = np.zeros(len(class_labels), dtype=float)
+    for j, label in enumerate(class_labels):
+        scores[j] = sum(float(bba.get_mass(label)) for bba in sample_bbas) / n
+    s = float(scores.sum())
+    if s > 1e-15:
+        scores /= s
+    else:
+        scores[:] = 1.0 / max(len(class_labels), 1)
+    return scores
+
+
+def _run_fusion_on_bbas(
+    bbas_per_sample: List[List[BeliefMass]],
+    subset_indices: List[int],
+    fusion_method: str,
+    class_labels: List[str],
+    label_lookup: dict[str, int],
+    y_eval: np.ndarray,
+    model_ids: Optional[List[str]] = None,
+) -> Tuple[Dict[str, Any], np.ndarray]:
+    n_eval = len(bbas_per_sample)
+    y_pred: List[int] = []
+    fused_scores: List[np.ndarray] = []
+    total_conflict = 0.0
+
+    for idx in range(n_eval):
+        sample_bbas = [bbas_per_sample[idx][j] for j in subset_indices]
+        try:
+            if fusion_method == "dempster":
+                try:
+                    fused, conflict = dempster_fusion(sample_bbas)
+                except ValueError as ve:
+                    if "DST fusion impossible" not in str(ve):
+                        raise
+                    # Total conflict (K=1): no normalized DST result — use mean singleton masses.
+                    singleton_scores = _average_singleton_scores_from_bbas(sample_bbas, class_labels)
+                    total_conflict += 1.0
+                    fused_scores.append(singleton_scores)
+                    predicted_label = class_labels[int(np.argmax(singleton_scores))]
+                    y_pred.append(label_lookup[predicted_label])
+                    continue
+            elif fusion_method == "pcr5":
+                fused, conflict = pcr5_fusion(sample_bbas)
+            elif fusion_method == "pcr6":
+                fused, conflict = pcr6_fusion(sample_bbas)
+            else:
+                raise HTTPException(status_code=400, detail="Unknown fusion method")
+
+            if conflict is not None:
+                total_conflict += conflict
+
+            singleton_scores = np.array(
+                [float(fused.get_mass(label)) for label in class_labels],
+                dtype=float,
+            )
+            fused_scores.append(singleton_scores)
+
+            if np.any(singleton_scores):
+                predicted_label = class_labels[int(np.argmax(singleton_scores))]
+            else:
+                items = list(fused.items())
+                if items:
+                    best_hyp, _ = max(items, key=lambda x: x[1])
+                    predicted_label = next(iter(best_hyp))
+                else:
+                    singleton_scores = _average_singleton_scores_from_bbas(sample_bbas, class_labels)
+                    predicted_label = class_labels[int(np.argmax(singleton_scores))]
+                    fused_scores[-1] = singleton_scores
+
+            if predicted_label not in label_lookup:
+                singleton_scores = _average_singleton_scores_from_bbas(sample_bbas, class_labels)
+                predicted_label = class_labels[int(np.argmax(singleton_scores))]
+                fused_scores[-1] = singleton_scores
+
+            if predicted_label not in label_lookup:
+                raise HTTPException(status_code=500, detail=f"Unknown fused label '{predicted_label}'.")
+            y_pred.append(label_lookup[predicted_label])
+        except HTTPException:
+            raise
+        except Exception as e:
+            sub = ""
+            if model_ids:
+                sub = ",".join(model_ids[j] for j in subset_indices)
+                sub = f" [{sub}]"
+            raise HTTPException(
+                status_code=500,
+                detail=f"Fusion error at sample {idx} with {len(sample_bbas)} models{sub}: {str(e)}",
+            ) from e
+
+    fused_metrics = calculate_classification_metrics(
+        y_eval,
+        np.asarray(y_pred),
+        np.asarray(fused_scores) if fused_scores else None,
+    )
+    avg_conflict = (total_conflict / n_eval) if total_conflict > 0 and n_eval > 0 else None
+    fused_metrics["conflict"] = avg_conflict
+    return fused_metrics, np.asarray(y_pred, dtype=int)
+
+
+def _execute_ml_training(
     X: np.ndarray,
     y: np.ndarray,
     model_configs: List[ClassifierConfig],
@@ -956,12 +1096,19 @@ def execute_ml_fusion(
     preprocessor: ColumnTransformer | None = None,
     use_cross_validation: bool = False,
     cv_folds: int = 5,
-) -> MLFusionResponse:
-    if issparse(X):
-        X = X.toarray()
-
-    y = np.asarray(y)
-
+) -> Tuple[
+    List[str],
+    LabelEncoder,
+    List[str],
+    dict[str, int],
+    List[str],
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    List[MLFusionResult],
+    str,
+    List[List[BeliefMass]],
+]:
     model_ids = [c.id for c in model_configs]
     params_map = {c.id: c.params for c in model_configs}
 
@@ -1069,62 +1216,68 @@ def execute_ml_fusion(
             )
 
     y_preds_matrix = np.stack(y_preds_rows, axis=0)
-    n_eval = model_probabilities[0].shape[0]
+    bbas_per_sample = _build_bbas_per_sample(model_probabilities, class_labels)
 
-    bbas_per_sample: List[List[BeliefMass]] = []
-    for i in range(n_eval):
-        sample_bbas = []
-        for model_proba in model_probabilities:
-            proba = model_proba[i]
-            bba = proba_to_bba(proba, class_labels)
-            sample_bbas.append(bba)
-        bbas_per_sample.append(sample_bbas)
-
-    y_pred: List[int] = []
-    fused_scores: List[np.ndarray] = []
-    total_conflict = 0.0
-
-    for idx, sample_bbas in enumerate(bbas_per_sample):
-        try:
-            if fusion_method == "dempster":
-                fused, conflict = dempster_fusion(sample_bbas)
-            elif fusion_method == "pcr5":
-                fused, conflict = pcr5_fusion(sample_bbas)
-            elif fusion_method == "pcr6":
-                fused, conflict = pcr6_fusion(sample_bbas)
-            else:
-                raise HTTPException(status_code=400, detail="Unknown fusion method")
-
-            if conflict is not None:
-                total_conflict += conflict
-
-            singleton_scores = np.array(
-                [float(fused.get_mass(label)) for label in class_labels],
-                dtype=float,
-            )
-            fused_scores.append(singleton_scores)
-
-            if np.any(singleton_scores):
-                predicted_label = class_labels[int(np.argmax(singleton_scores))]
-            else:
-                best_label = max(fused.items(), key=lambda x: x[1])[0]
-                predicted_label = next(iter(best_label))
-
-            if predicted_label not in label_lookup:
-                raise HTTPException(status_code=500, detail=f"Unknown fused label '{predicted_label}'.")
-            y_pred.append(label_lookup[predicted_label])
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Fusion error at sample {idx} with {len(sample_bbas)} models: {str(e)}",
-            )
-
-    fused_metrics = calculate_classification_metrics(
+    return (
+        model_ids,
+        le,
+        class_labels,
+        label_lookup,
+        class_labels_human,
+        y_preds_matrix,
         y_eval,
-        np.asarray(y_pred),
-        np.asarray(fused_scores) if fused_scores else None,
+        idx_eval,
+        per_model_results,
+        evaluation_mode,
+        bbas_per_sample,
     )
-    avg_conflict = (total_conflict / n_eval) if total_conflict > 0 and n_eval > 0 else None
+
+
+def execute_ml_fusion(
+    X: np.ndarray,
+    y: np.ndarray,
+    model_configs: List[ClassifierConfig],
+    fusion_method: str,
+    preprocessor: ColumnTransformer | None = None,
+    use_cross_validation: bool = False,
+    cv_folds: int = 5,
+) -> MLFusionResponse:
+    if issparse(X):
+        X = X.toarray()
+
+    y = np.asarray(y)
+
+    (
+        model_ids,
+        le,
+        class_labels,
+        label_lookup,
+        class_labels_human,
+        y_preds_matrix,
+        y_eval,
+        idx_eval,
+        per_model_results,
+        evaluation_mode,
+        bbas_per_sample,
+    ) = _execute_ml_training(
+        X,
+        y,
+        model_configs,
+        fusion_method,
+        preprocessor,
+        use_cross_validation,
+        cv_folds,
+    )
+
+    fused_metrics, y_fused_arr = _run_fusion_on_bbas(
+        bbas_per_sample,
+        list(range(len(model_ids))),
+        fusion_method,
+        class_labels,
+        label_lookup,
+        y_eval,
+        model_ids,
+    )
 
     fused_result = MLFusionResult(
         kind="fusion",
@@ -1135,10 +1288,9 @@ def execute_ml_fusion(
         recall=fused_metrics["recall"],
         f1_score=fused_metrics["f1_score"],
         roc_auc=fused_metrics["roc_auc"],
-        conflict=avg_conflict,
+        conflict=fused_metrics["conflict"],
     )
 
-    y_fused_arr = np.asarray(y_pred, dtype=int)
     sample_analysis = _build_fusion_sample_analysis(
         le,
         model_ids,
@@ -1159,6 +1311,206 @@ def execute_ml_fusion(
         classLabels=class_labels_human,
         confusionMatrixFusion=cm.tolist(),
     )
+
+
+def _assert_fusion_search_allowed(n_models: int) -> None:
+    if n_models < 2:
+        raise HTTPException(status_code=400, detail="Combination search requires at least 2 models.")
+    if n_models > MAX_SEARCH_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Select at most {MAX_SEARCH_MODELS} models for combination search.",
+        )
+    if _count_search_evaluations(n_models) > MAX_SEARCH_EVALS:
+        raise HTTPException(
+            status_code=400,
+            detail="Too many fusion combinations to evaluate; select fewer models.",
+        )
+
+
+def iter_fusion_search_entries(
+    bbas_per_sample: List[List[BeliefMass]],
+    model_ids: List[str],
+    class_labels: List[str],
+    label_lookup: dict[str, int],
+    y_eval: np.ndarray,
+) -> Iterator[Tuple[int, int, MLFusionSearchEntry]]:
+    """Yields (done, total, entry) for each fusion combination (subset × rule)."""
+    n_models = len(model_ids)
+    total = _count_search_evaluations(n_models)
+    done = 0
+    indices = list(range(n_models))
+    for r in range(2, n_models + 1):
+        for subset_idx in combinations(indices, r):
+            subset_list = list(subset_idx)
+            for fm in FUSION_METHODS_SEARCH:
+                fused_metrics, _y_pred = _run_fusion_on_bbas(
+                    bbas_per_sample,
+                    subset_list,
+                    fm,
+                    class_labels,
+                    label_lookup,
+                    y_eval,
+                    model_ids,
+                )
+                entry = MLFusionSearchEntry(
+                    model_ids=[model_ids[i] for i in subset_list],
+                    fusion_method=fm,
+                    accuracy=fused_metrics["accuracy"],
+                    precision=fused_metrics["precision"],
+                    recall=fused_metrics["recall"],
+                    f1_score=fused_metrics["f1_score"],
+                    roc_auc=fused_metrics["roc_auc"],
+                    conflict=fused_metrics["conflict"],
+                )
+                done += 1
+                yield done, total, entry
+
+
+def execute_ml_fusion_search(
+    X: np.ndarray,
+    y: np.ndarray,
+    model_configs: List[ClassifierConfig],
+    preprocessor: ColumnTransformer | None = None,
+    use_cross_validation: bool = False,
+    cv_folds: int = 5,
+) -> MLFusionSearchResponse:
+    n_models = len(model_configs)
+    _assert_fusion_search_allowed(n_models)
+
+    if issparse(X):
+        X = X.toarray()
+    y = np.asarray(y)
+
+    (
+        model_ids,
+        _le,
+        class_labels,
+        label_lookup,
+        class_labels_human,
+        _y_preds_matrix,
+        y_eval,
+        _idx_eval,
+        per_model_results,
+        evaluation_mode,
+        bbas_per_sample,
+    ) = _execute_ml_training(
+        X,
+        y,
+        model_configs,
+        fusion_method="dempster",
+        preprocessor=preprocessor,
+        use_cross_validation=use_cross_validation,
+        cv_folds=cv_folds,
+    )
+
+    entries = [e for _done, _total, e in iter_fusion_search_entries(
+        bbas_per_sample,
+        model_ids,
+        class_labels,
+        label_lookup,
+        y_eval,
+    )]
+
+    entries.sort(key=lambda e: (-e.accuracy, -e.f1_score, -e.precision))
+    best = entries[0]
+    ranking = entries[:100]
+
+    return MLFusionSearchResponse(
+        best=best,
+        ranking=ranking,
+        evaluationMode=evaluation_mode,
+        total_combinations_evaluated=len(entries),
+        per_model_results=per_model_results,
+        classLabels=class_labels_human,
+    )
+
+
+def _ndjson_stream_ml_fusion_search(
+    X: np.ndarray,
+    y: np.ndarray,
+    model_configs: List[ClassifierConfig],
+    preprocessor: ColumnTransformer | None,
+    use_cross_validation: bool,
+    cv_folds: int,
+) -> Iterator[str]:
+    """NDJSON lines: phase → progress → … → complete | error."""
+    n_models = len(model_configs)
+    try:
+        _assert_fusion_search_allowed(n_models)
+    except HTTPException as exc:
+        det = exc.detail
+        detail_str = det if isinstance(det, str) else json.dumps(det)
+        yield json.dumps({"type": "error", "detail": detail_str}) + "\n"
+        return
+
+    try:
+        yield json.dumps({"type": "phase", "phase": "training"}) + "\n"
+
+        if issparse(X):
+            X = X.toarray()
+        y = np.asarray(y)
+
+        (
+            model_ids,
+            _le,
+            class_labels,
+            label_lookup,
+            class_labels_human,
+            _y_preds_matrix,
+            y_eval,
+            _idx_eval,
+            per_model_results,
+            evaluation_mode,
+            bbas_per_sample,
+        ) = _execute_ml_training(
+            X,
+            y,
+            model_configs,
+            fusion_method="dempster",
+            preprocessor=preprocessor,
+            use_cross_validation=use_cross_validation,
+            cv_folds=cv_folds,
+        )
+
+        total = _count_search_evaluations(n_models)
+        throttle = max(1, total // 200)
+        last_sent = 0
+        entries: List[MLFusionSearchEntry] = []
+
+        yield json.dumps({"type": "progress", "phase": "combinations", "done": 0, "total": total}) + "\n"
+
+        for done, tot, entry in iter_fusion_search_entries(
+            bbas_per_sample,
+            model_ids,
+            class_labels,
+            label_lookup,
+            y_eval,
+        ):
+            entries.append(entry)
+            if done == 1 or done == tot or done - last_sent >= throttle:
+                last_sent = done
+                yield json.dumps({"type": "progress", "phase": "combinations", "done": done, "total": tot}) + "\n"
+
+        entries.sort(key=lambda e: (-e.accuracy, -e.f1_score, -e.precision))
+        best = entries[0]
+        ranking = entries[:100]
+        response = MLFusionSearchResponse(
+            best=best,
+            ranking=ranking,
+            evaluationMode=evaluation_mode,
+            total_combinations_evaluated=len(entries),
+            per_model_results=per_model_results,
+            classLabels=class_labels_human,
+        )
+        yield json.dumps({"type": "complete", "data": response.model_dump()}) + "\n"
+    except Exception as exc:
+        if isinstance(exc, HTTPException):
+            det: Any = exc.detail
+            detail_str = det if isinstance(det, str) else json.dumps(det)
+        else:
+            detail_str = str(exc)
+        yield json.dumps({"type": "error", "detail": detail_str}) + "\n"
 
 @app.post("/ml/run", response_model=MLFusionResponse)
 def fuse_ml(request: MLFusionRequest):
@@ -1229,4 +1581,149 @@ async def fuse_uploaded_ml(
         preprocessor,
         use_cross_validation=ucv,
         cv_folds=cv_folds,
+    )
+
+
+@app.post("/ml/search", response_model=MLFusionSearchResponse)
+def ml_search(request: MLFusionSearchRequest) -> MLFusionSearchResponse:
+    """Train all selected models once, then evaluate every subset (size ≥ 2) × fusion rule."""
+    dataset_bundle = load_dataset(request.datasetId)
+    return execute_ml_fusion_search(
+        dataset_bundle["X"],
+        dataset_bundle["y"],
+        request.models,
+        use_cross_validation=request.useCrossValidation,
+        cv_folds=request.cvFolds,
+    )
+
+
+@app.post("/ml/search-upload", response_model=MLFusionSearchResponse)
+async def ml_search_upload(
+    file: UploadFile = File(...),
+    target_column: str = Form(...),
+    feature_columns: str = Form(...),
+    models: str = Form(...),
+    use_cross_validation: str = Form("false"),
+    cv_folds: int = Form(5),
+) -> MLFusionSearchResponse:
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a .csv file.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    parsed_feature_columns = parse_feature_columns_form(feature_columns)
+    try:
+        raw_models = json.loads(models)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="models must be valid JSON.") from exc
+    model_configs = _parse_model_configs_json(raw_models)
+
+    ucv = str(use_cross_validation).lower() in ("true", "1", "yes", "on")
+
+    if cv_folds < 2 or cv_folds > 15:
+        raise HTTPException(status_code=400, detail="cv_folds must be between 2 and 15.")
+
+    _, dataset_entry, _, _, _ = prepare_uploaded_dataset(
+        file.filename,
+        content,
+        requested_target_column=target_column.strip(),
+        requested_feature_columns=parsed_feature_columns,
+    )
+
+    X = build_uploaded_feature_matrix(
+        dataset_entry["rows"],
+        dataset_entry["feature_columns"],
+        dataset_entry["feature_types"],
+    )
+    y = np.asarray([row[dataset_entry["target_column"]] for row in dataset_entry["rows"]], dtype=object)
+    preprocessor = build_uploaded_preprocessor(
+        dataset_entry["feature_columns"],
+        dataset_entry["feature_types"],
+    )
+
+    return execute_ml_fusion_search(
+        X,
+        y,
+        model_configs,
+        preprocessor,
+        use_cross_validation=ucv,
+        cv_folds=cv_folds,
+    )
+
+
+@app.post("/ml/search-stream")
+def ml_search_stream(request: MLFusionSearchRequest) -> StreamingResponse:
+    """Same as /ml/search but streams NDJSON progress (training phase + combination counts)."""
+    dataset_bundle = load_dataset(request.datasetId)
+    return StreamingResponse(
+        _ndjson_stream_ml_fusion_search(
+            dataset_bundle["X"],
+            dataset_bundle["y"],
+            request.models,
+            None,
+            request.useCrossValidation,
+            request.cvFolds,
+        ),
+        media_type="application/x-ndjson",
+    )
+
+
+@app.post("/ml/search-upload-stream")
+async def ml_search_upload_stream(
+    file: UploadFile = File(...),
+    target_column: str = Form(...),
+    feature_columns: str = Form(...),
+    models: str = Form(...),
+    use_cross_validation: str = Form("false"),
+    cv_folds: int = Form(5),
+) -> StreamingResponse:
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a .csv file.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    parsed_feature_columns = parse_feature_columns_form(feature_columns)
+    try:
+        raw_models = json.loads(models)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="models must be valid JSON.") from exc
+    model_configs = _parse_model_configs_json(raw_models)
+
+    ucv = str(use_cross_validation).lower() in ("true", "1", "yes", "on")
+
+    if cv_folds < 2 or cv_folds > 15:
+        raise HTTPException(status_code=400, detail="cv_folds must be between 2 and 15.")
+
+    _, dataset_entry, _, _, _ = prepare_uploaded_dataset(
+        file.filename,
+        content,
+        requested_target_column=target_column.strip(),
+        requested_feature_columns=parsed_feature_columns,
+    )
+
+    X = build_uploaded_feature_matrix(
+        dataset_entry["rows"],
+        dataset_entry["feature_columns"],
+        dataset_entry["feature_types"],
+    )
+    y = np.asarray([row[dataset_entry["target_column"]] for row in dataset_entry["rows"]], dtype=object)
+    preprocessor = build_uploaded_preprocessor(
+        dataset_entry["feature_columns"],
+        dataset_entry["feature_types"],
+    )
+
+    return StreamingResponse(
+        _ndjson_stream_ml_fusion_search(
+            X,
+            y,
+            model_configs,
+            preprocessor,
+            ucv,
+            cv_folds,
+        ),
+        media_type="application/x-ndjson",
     )

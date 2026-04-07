@@ -142,6 +142,33 @@ class MLFusionResponse(BaseModel):
     confusionMatrixFusion: Optional[List[List[int]]] = None
 
 
+class MLFusionSearchRequest(BaseModel):
+    datasetId: str
+    models: List[ClassifierConfig]
+    useCrossValidation: bool = False
+    cvFolds: int = Field(default=5, ge=2, le=15)
+
+
+class MLFusionSearchEntry(BaseModel):
+    model_ids: List[str]
+    fusion_method: str
+    accuracy: float
+    precision: float
+    recall: float
+    f1_score: float
+    roc_auc: Optional[float] = None
+    conflict: Optional[float] = None
+
+
+class MLFusionSearchResponse(BaseModel):
+    best: MLFusionSearchEntry
+    ranking: List[MLFusionSearchEntry]
+    evaluationMode: str = "holdout"
+    total_combinations_evaluated: int
+    per_model_results: List[MLFusionResult]
+    classLabels: List[str] = Field(default_factory=list)
+
+
 # Calculator Examples
 class ExampleSource(BaseModel):
     name: str
