@@ -11,6 +11,7 @@ function MLPipeline({ darkMode }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [results, setResults] = useState(null)
+  const [sampleAnalysis, setSampleAnalysis] = useState(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState(null)
@@ -105,7 +106,7 @@ function MLPipeline({ darkMode }) {
 
   const runFusion = async () => {
     if (selectedModels.length < 2) { setError('Select at least 2 models'); return }
-    setError(null); setResults(null); setLoading(true)
+    setError(null); setResults(null); setSampleAnalysis(null); setLoading(true)
     try {
       const isCustom = customDataset?.dataset.id === selectedDataset
       let r
@@ -120,6 +121,7 @@ function MLPipeline({ darkMode }) {
       }
       const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'ML Fusion failed')
       setResults(d.results)
+      setSampleAnalysis(d.sample_analysis ?? null)
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }
@@ -447,6 +449,127 @@ function MLPipeline({ darkMode }) {
                 </tbody>
               </table>
             </div>
+
+            {sampleAnalysis && (() => {
+              const bestName = models.find(m => m.id === sampleAnalysis.best_model_id)?.name || sampleAnalysis.best_model_id
+              const stat = (label, value, hint) => (
+                <div
+                  key={label}
+                  className="rounded-lg border px-3 py-2"
+                  style={{ borderColor: 'var(--line)', background: 'var(--bg-elevated)' }}
+                >
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: 'var(--text-muted)' }}>{label}</p>
+                  <p className="mono mt-0.5 text-lg font-bold" style={{ color: 'var(--text-strong)' }}>{value}</p>
+                  {hint && <p className="mt-0.5 text-[10px] leading-4" style={{ color: 'var(--text-muted)' }}>{hint}</p>}
+                </div>
+              )
+              const sampleTable = (title, subtitle, rows, total, truncated, borderAccent) => (
+                <div className="mt-4">
+                  <h4 className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>{title}</h4>
+                  {subtitle && <p className="mt-1 text-xs leading-5" style={{ color: 'var(--text-muted)' }}>{subtitle}</p>}
+                  {rows.length === 0 ? (
+                    <p className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>No samples in this category.</p>
+                  ) : (
+                    <>
+                      <div className="mt-2 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--line)' }}>
+                        <table className="w-full min-w-[640px] text-xs" style={{ background: 'var(--bg-elevated)' }}>
+                          <thead>
+                            <tr style={{ color: 'var(--text-muted)', background: 'var(--bg-sunken)' }}>
+                              <th className="px-3 py-2 text-left font-semibold uppercase tracking-[0.08em]">Dataset row</th>
+                              <th className="px-3 py-2 text-left font-semibold uppercase tracking-[0.08em]">Test idx</th>
+                              <th className="px-3 py-2 text-left font-semibold uppercase tracking-[0.08em]">True</th>
+                              <th className="px-3 py-2 text-left font-semibold uppercase tracking-[0.08em]">Fusion</th>
+                              {selectedModels.map(mid => (
+                                <th key={mid} className="px-3 py-2 text-left font-semibold uppercase tracking-[0.08em]">
+                                  {models.find(m => m.id === mid)?.name || mid}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map((row, ri) => (
+                              <tr
+                                key={`${row.test_index}-${row.original_row_index}-${ri}`}
+                                className="border-t"
+                                style={{ borderColor: 'var(--line)' }}
+                              >
+                                <td className="px-3 py-2 mono" style={{ color: 'var(--text)' }}>{row.original_row_index}</td>
+                                <td className="px-3 py-2 mono" style={{ color: 'var(--text)' }}>{row.test_index}</td>
+                                <td className="px-3 py-2 mono" style={{ color: 'var(--text-strong)' }}>{row.y_true}</td>
+                                <td
+                                  className="px-3 py-2 mono font-semibold"
+                                  style={{ color: borderAccent ? 'var(--accent-strong)' : 'var(--danger)' }}
+                                >
+                                  {row.y_fused}
+                                </td>
+                                {selectedModels.map(mid => (
+                                  <td key={mid} className="px-3 py-2 mono" style={{ color: 'var(--text)' }}>
+                                    {row.predictions[mid] ?? '—'}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {truncated && total > rows.length && (
+                        <p className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                          Showing first {rows.length} of {total} samples.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )
+              return (
+                <div
+                  className="mt-8 overflow-hidden rounded-xl border"
+                  style={{ borderColor: 'var(--line)' }}
+                >
+                  <div
+                    className="flex items-center gap-2 px-4 py-2.5"
+                    style={{ background: 'var(--bg-sunken)', borderBottom: '1px solid var(--line)' }}
+                  >
+                    <span className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--text-strong)' }}>
+                      Sample-level analysis
+                    </span>
+                  </div>
+                  <div className="space-y-2 p-4">
+                    <p className="text-sm leading-6" style={{ color: 'var(--text-muted)' }}>
+                      Test set:{' '}
+                      <span className="mono font-semibold" style={{ color: 'var(--text-strong)' }}>{sampleAnalysis.test_set_size}</span>
+                      {' '}samples. Baseline model (highest test accuracy):{' '}
+                      <span className="font-semibold" style={{ color: 'var(--text-strong)' }}>{bestName}</span>.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                      {stat('Gain vs best', sampleAnalysis.gain_vs_best, 'Fusion correct, baseline wrong')}
+                      {stat('Loss vs best', sampleAnalysis.loss_vs_best, 'Baseline correct, fusion wrong')}
+                      {stat('Both correct', sampleAnalysis.tie_correct_vs_best, 'Fusion and baseline agree (correct)')}
+                      {stat('Both wrong', sampleAnalysis.tie_wrong_vs_best, 'Fusion and baseline agree (wrong)')}
+                      {stat('Gain vs majority', sampleAnalysis.gain_vs_majority, 'Fusion correct, majority vote wrong')}
+                      {stat('Loss vs majority', sampleAnalysis.loss_vs_majority, 'Majority correct, fusion wrong')}
+                      {stat('Rescue', sampleAnalysis.rescue_all_wrong, 'Fusion correct while every model wrong')}
+                    </div>
+                    {sampleTable(
+                      `Where fusion beats the best single model (${bestName})`,
+                      'Fusion predicted the true label; the baseline single model did not.',
+                      sampleAnalysis.gains_vs_best,
+                      sampleAnalysis.gains_vs_best_total,
+                      sampleAnalysis.gains_vs_best_truncated,
+                      true,
+                    )}
+                    {sampleTable(
+                      `Where fusion is worse than the best single model (${bestName})`,
+                      'The baseline single model predicted the true label; fusion did not.',
+                      sampleAnalysis.losses_vs_best,
+                      sampleAnalysis.losses_vs_best_total,
+                      sampleAnalysis.losses_vs_best_truncated,
+                      false,
+                    )}
+                  </div>
+                </div>
+              )
+            })()}
           </section>
         )
       })()}

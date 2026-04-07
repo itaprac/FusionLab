@@ -50,7 +50,29 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neural_network import MLPClassifier
 
-from models import Methods, GetMethodsResponse, FusionRequest, FusionResponse, FusionResult, DataSet, GetDataSetsResponse, DatasetPreviewColumn, DatasetPreviewResponse, UploadDatasetResponse, Classifiers, GetClassifiersResponse, ClassifierConfig, MLFusionRequest, MLFusionResponse, MLFusionResult, Example, ExampleSource, GetExamplesResponse
+from models import (
+    Methods,
+    GetMethodsResponse,
+    FusionRequest,
+    FusionResponse,
+    FusionResult,
+    DataSet,
+    GetDataSetsResponse,
+    DatasetPreviewColumn,
+    DatasetPreviewResponse,
+    UploadDatasetResponse,
+    Classifiers,
+    GetClassifiersResponse,
+    ClassifierConfig,
+    MLFusionRequest,
+    MLFusionResponse,
+    MLFusionResult,
+    FusionSampleAnalysis,
+    FusionSampleDetail,
+    Example,
+    ExampleSource,
+    GetExamplesResponse,
+)
 
 #Funkcje dostepne w API
 METHODS = [
@@ -723,6 +745,120 @@ def calculate_classification_metrics(
     return metrics
 
 
+DETAIL_SAMPLE_LIMIT = 150
+
+
+def _majority_vote_labels(y_preds_matrix: np.ndarray, n_classes: int) -> np.ndarray:
+    """y_preds_matrix shape (n_models, n_test); returns (n_test,) encoded class indices."""
+    n_test = y_preds_matrix.shape[1]
+    out = np.empty(n_test, dtype=int)
+    for j in range(n_test):
+        votes = y_preds_matrix[:, j].astype(int, copy=False)
+        counts = np.bincount(votes, minlength=n_classes)
+        out[j] = int(np.argmax(counts))
+    return out
+
+
+def _build_fusion_sample_analysis(
+    le: LabelEncoder,
+    model_ids: List[str],
+    y_test: np.ndarray,
+    idx_test: np.ndarray,
+    y_preds_matrix: np.ndarray,
+    y_fused: np.ndarray,
+    per_model_results: List[MLFusionResult],
+) -> FusionSampleAnalysis:
+    n_test = len(y_test)
+    n_classes = len(le.classes_)
+
+    def enc_to_str(z: int) -> str:
+        return str(le.inverse_transform([int(z)])[0])
+
+    best_idx = 0
+    for i in range(len(model_ids)):
+        if per_model_results[i].accuracy > per_model_results[best_idx].accuracy:
+            best_idx = i
+    best_model_id = model_ids[best_idx]
+    y_best = y_preds_matrix[best_idx]
+
+    mv = _majority_vote_labels(y_preds_matrix, n_classes)
+
+    gain_b = loss_b = tcb = twb = 0
+    gain_m = loss_m = tcm = twm = 0
+    rescue = 0
+
+    gain_b_indices: List[int] = []
+    loss_b_indices: List[int] = []
+
+    for i in range(n_test):
+        yt = int(y_test[i])
+        yf = int(y_fused[i])
+        fusion_ok = yf == yt
+        best_ok = int(y_best[i]) == yt
+        mv_ok = int(mv[i]) == yt
+        all_wrong = bool(np.all(y_preds_matrix[:, i] != yt))
+
+        if fusion_ok and not best_ok:
+            gain_b += 1
+            gain_b_indices.append(i)
+        elif best_ok and not fusion_ok:
+            loss_b += 1
+            loss_b_indices.append(i)
+        elif fusion_ok and best_ok:
+            tcb += 1
+        else:
+            twb += 1
+
+        if fusion_ok and not mv_ok:
+            gain_m += 1
+        elif mv_ok and not fusion_ok:
+            loss_m += 1
+        elif fusion_ok and mv_ok:
+            tcm += 1
+        else:
+            twm += 1
+
+        if fusion_ok and all_wrong:
+            rescue += 1
+
+    def make_detail(test_i: int) -> FusionSampleDetail:
+        preds = {mid: enc_to_str(y_preds_matrix[k, test_i]) for k, mid in enumerate(model_ids)}
+        return FusionSampleDetail(
+            test_index=test_i,
+            original_row_index=int(idx_test[test_i]),
+            y_true=enc_to_str(y_test[test_i]),
+            y_fused=enc_to_str(y_fused[test_i]),
+            predictions=preds,
+        )
+
+    gb_total = len(gain_b_indices)
+    lb_total = len(loss_b_indices)
+    gb_trunc = gb_total > DETAIL_SAMPLE_LIMIT
+    lb_trunc = lb_total > DETAIL_SAMPLE_LIMIT
+    gains_list = [make_detail(i) for i in gain_b_indices[:DETAIL_SAMPLE_LIMIT]]
+    losses_list = [make_detail(i) for i in loss_b_indices[:DETAIL_SAMPLE_LIMIT]]
+
+    return FusionSampleAnalysis(
+        test_set_size=n_test,
+        best_model_id=best_model_id,
+        gain_vs_best=gain_b,
+        loss_vs_best=loss_b,
+        tie_correct_vs_best=tcb,
+        tie_wrong_vs_best=twb,
+        gain_vs_majority=gain_m,
+        loss_vs_majority=loss_m,
+        tie_correct_vs_majority=tcm,
+        tie_wrong_vs_majority=twm,
+        rescue_all_wrong=rescue,
+        gains_vs_best=gains_list,
+        gains_vs_best_total=gb_total,
+        gains_vs_best_truncated=gb_trunc,
+        losses_vs_best=losses_list,
+        losses_vs_best_total=lb_total,
+        losses_vs_best_truncated=lb_trunc,
+    )
+
+
 def execute_ml_fusion(
     X: np.ndarray,
     y: np.ndarray,
@@ -740,9 +876,15 @@ def execute_ml_fusion(
     class_labels = [str(index) for index in range(len(le.classes_))]
     label_lookup = {label: index for index, label in enumerate(class_labels)}
 
+    row_indices = np.arange(X.shape[0], dtype=int)
     try:
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y_encoded, test_size=0.25, random_state=42, stratify=y_encoded
+        X_train, X_test, y_train, y_test, _idx_train, idx_test = train_test_split(
+            X,
+            y_encoded,
+            row_indices,
+            test_size=0.25,
+            random_state=42,
+            stratify=y_encoded,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Dataset cannot be split for training: {str(exc)}") from exc
@@ -751,6 +893,7 @@ def execute_ml_fusion(
 
     classifiers = []
     model_probabilities: List[np.ndarray] = []
+    y_preds_rows: List[np.ndarray] = []
     for model_id in model_ids:
         model = build_training_model(model_id, preprocessor)
         try:
@@ -759,10 +902,14 @@ def execute_ml_fusion(
             raise HTTPException(status_code=400, detail=f"Model '{model_id}' could not be trained: {str(exc)}") from exc
         classifiers.append(model)
         model_probabilities.append(model.predict_proba(X_test))
+        y_preds_rows.append(model.predict(X_test))
+
+    y_preds_matrix = np.stack(y_preds_rows, axis=0)
 
     per_model_results = []
-    for model_id, model, model_proba in zip(model_ids, classifiers, model_probabilities):
-        y_pred_model = model.predict(X_test)
+    for model_id, model, model_proba, y_pred_model in zip(
+        model_ids, classifiers, model_probabilities, y_preds_rows
+    ):
         model_metrics = calculate_classification_metrics(y_test, y_pred_model, model_proba)
         per_model_results.append(
             MLFusionResult(
@@ -846,7 +993,18 @@ def execute_ml_fusion(
         conflict=avg_conflict
     )
 
-    return MLFusionResponse(results=[*per_model_results, fused_result])
+    y_fused_arr = np.asarray(y_pred, dtype=int)
+    sample_analysis = _build_fusion_sample_analysis(
+        le,
+        model_ids,
+        y_test,
+        idx_test,
+        y_preds_matrix,
+        y_fused_arr,
+        per_model_results,
+    )
+
+    return MLFusionResponse(results=[*per_model_results, fused_result], sample_analysis=sample_analysis)
 
 @app.post("/ml/run", response_model=MLFusionResponse)
 def fuse_ml(request: MLFusionRequest):

@@ -92,8 +92,38 @@ class MLFusionResult(BaseModel):
     roc_auc: Optional[float] = None
     conflict: Optional[float]  # None gdy fuzja 3+ modeli (konflikt kumulatywny)
 
+class FusionSampleDetail(BaseModel):
+    """Single test sample for inspection (labels as human-readable strings)."""
+    test_index: int
+    original_row_index: int
+    y_true: str
+    y_fused: str
+    predictions: Dict[str, str]
+
+
+class FusionSampleAnalysis(BaseModel):
+    test_set_size: int
+    best_model_id: str
+    gain_vs_best: int
+    loss_vs_best: int
+    tie_correct_vs_best: int
+    tie_wrong_vs_best: int
+    gain_vs_majority: int
+    loss_vs_majority: int
+    tie_correct_vs_majority: int
+    tie_wrong_vs_majority: int
+    rescue_all_wrong: int
+    gains_vs_best: List[FusionSampleDetail]
+    gains_vs_best_total: int
+    gains_vs_best_truncated: bool
+    losses_vs_best: List[FusionSampleDetail]
+    losses_vs_best_total: int
+    losses_vs_best_truncated: bool
+
+
 class MLFusionResponse(BaseModel):
     results: List[MLFusionResult]
+    sample_analysis: FusionSampleAnalysis
 
 
 # Calculator Examples

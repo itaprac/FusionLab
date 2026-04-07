@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Routes, Route } from 'react-router-dom'
 import Header from './components/Header'
 import Home from './components/Home'
 import MLPipeline from './components/MLPipeline'
@@ -6,8 +7,18 @@ import Calculator from './components/Calculator'
 import Examples from './components/Examples'
 import ExampleCalculator from './components/ExampleCalculator'
 import ExampleMLFusion from './components/ExampleMLFusion'
+import Poster1 from './components/posters/Poster1'
+import Poster2 from './components/posters/Poster2'
+import Poster3 from './components/posters/Poster3'
+import Poster4 from './components/posters/Poster4'
+import Poster5 from './components/posters/Poster5'
+import Poster6 from './components/posters/Poster6'
+import Poster7 from './components/posters/Poster7'
+import Poster8 from './components/posters/Poster8'
+import Poster9 from './components/posters/Poster9'
+import Poster10 from './components/posters/Poster10'
 
-function App() {
+function MainApp() {
   const [activeView, setActiveView] = useState('home')
   const [calculatorPreset, setCalculatorPreset] = useState(null)
   const mainRef = useRef(null)
@@ -122,6 +133,24 @@ function App() {
         )}
       </main>
     </div>
+  )
+}
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<MainApp />} />
+      <Route path="/1" element={<Poster1 />} />
+      <Route path="/2" element={<Poster2 />} />
+      <Route path="/3" element={<Poster3 />} />
+      <Route path="/4" element={<Poster4 />} />
+      <Route path="/5" element={<Poster5 />} />
+      <Route path="/6" element={<Poster6 />} />
+      <Route path="/7" element={<Poster7 />} />
+      <Route path="/8" element={<Poster8 />} />
+      <Route path="/9" element={<Poster9 />} />
+      <Route path="/10" element={<Poster10 />} />
+    </Routes>
   )
 }
 
