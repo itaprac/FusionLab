@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import MethodSelector from './MethodSelector'
+import CodeExportModal from './CodeExportModal'
 import { useLanguage } from '../contexts/LanguageContext'
 
 function defaultsFromSchema(schema) {
@@ -218,6 +219,13 @@ function MLPipeline() {
   const [selectedTargetColumn, setSelectedTargetColumn] = useState('')
   const [selectedFeatureColumns, setSelectedFeatureColumns] = useState([])
   const [customDataset, setCustomDataset] = useState(null)
+  const [exportLoading, setExportLoading] = useState(false)
+  const [exportError, setExportError] = useState(null)
+  const [exportedCode, setExportedCode] = useState('')
+  const [exportFilename, setExportFilename] = useState('')
+  const [exportDatasetKind, setExportDatasetKind] = useState('builtin')
+  const [exportOpen, setExportOpen] = useState(false)
+  const [copySuccess, setCopySuccess] = useState(false)
 
   const fileInputRef = useRef(null)
   const fusionResultsRef = useRef(null)
@@ -345,6 +353,15 @@ function MLPipeline() {
   const toggleFeatureColumn = (n) =>
     setSelectedFeatureColumns((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n]))
 
+  const resetExportState = () => {
+    setExportError(null)
+    setExportedCode('')
+    setExportFilename('')
+    setExportDatasetKind('builtin')
+    setExportOpen(false)
+    setCopySuccess(false)
+  }
+
   const importConfiguredDataset = async () => {
     if (!pendingFile || !datasetPreview) {
       setUploadError('Choose a CSV file first.')
@@ -394,6 +411,7 @@ function MLPipeline() {
     setSampleAnalysis(null)
     setClassLabels([])
     setConfusionMatrixFusion(null)
+    resetExportState()
     setLoading(true)
     try {
       const payloadModels = selectedModels.map((id) => ({ id, params: modelParams[id] || {} }))
@@ -449,6 +467,7 @@ function MLPipeline() {
     setSampleAnalysis(null)
     setClassLabels([])
     setConfusionMatrixFusion(null)
+    resetExportState()
     setSearchProgress({ phase: 'training' })
     setSearchLoading(true)
     try {
@@ -569,6 +588,61 @@ function MLPipeline() {
       }
       return next
     })
+  }
+
+  const exportCode = async () => {
+    if (!results?.length || selectedModels.length < 2) return
+    setExportLoading(true)
+    setExportError(null)
+    setCopySuccess(false)
+    setExportOpen(true)
+    try {
+      const payloadModels = selectedModels.map((id) => ({ id, params: modelParams[id] || {} }))
+      const isCustom = customDataset?.dataset.id === selectedDataset
+      let r
+      if (isCustom) {
+        const fd = new FormData()
+        fd.append('file', customDataset.file)
+        fd.append('target_column', customDataset.targetColumn)
+        fd.append('feature_columns', JSON.stringify(customDataset.featureColumns))
+        fd.append('models', JSON.stringify(payloadModels))
+        fd.append('fusion_method', selectedMethod)
+        fd.append('use_cross_validation', useCV ? 'true' : 'false')
+        fd.append('cv_folds', String(cvFolds))
+        r = await fetch('/api/ml/export-code-upload', { method: 'POST', body: fd })
+      } else {
+        r = await fetch('/api/ml/export-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            datasetId: selectedDataset,
+            models: payloadModels,
+            fusionMethod: selectedMethod,
+            useCrossValidation: useCV,
+            cvFolds,
+          }),
+        })
+      }
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.detail || t('ml.err.generic'))
+      setExportedCode(d.code || '')
+      setExportFilename(d.filename || '')
+      setExportDatasetKind(d.datasetKind || (isCustom ? 'uploaded' : 'builtin'))
+    } catch (e) {
+      setExportError(e.message)
+    } finally {
+      setExportLoading(false)
+    }
+  }
+
+  const copyExportCode = async () => {
+    if (!exportedCode) return
+    try {
+      await navigator.clipboard.writeText(exportedCode)
+      setCopySuccess(true)
+    } catch {
+      setExportError(t('ml.export.copyError'))
+    }
   }
 
   return (
@@ -1012,9 +1086,14 @@ function MLPipeline() {
 
             <div className="flex items-center justify-between gap-3 mb-4">
               <p className="label">{t('ml.detail.title')}</p>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                {visibleDatasets.find((d) => d.id === selectedDataset)?.name || selectedDataset} · {methods.find((m) => m.id === selectedMethod)?.name || selectedMethod}
-              </p>
+              <div className="flex items-center gap-3">
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  {visibleDatasets.find((d) => d.id === selectedDataset)?.name || selectedDataset} · {methods.find((m) => m.id === selectedMethod)?.name || selectedMethod}
+                </p>
+                <button type="button" onClick={exportCode} disabled={exportLoading || loading} className="btn btn-secondary text-xs">
+                  {exportLoading ? t('ml.export.loading') : t('ml.export.button')}
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto rounded-xl border" style={{ borderColor: 'var(--line)' }}>
@@ -1166,6 +1245,22 @@ function MLPipeline() {
           </section>
         )
       })()}
+      <CodeExportModal
+        open={exportOpen}
+        loading={exportLoading}
+        error={exportError}
+        code={exportedCode}
+        filename={exportFilename}
+        datasetKind={exportDatasetKind}
+        copySuccess={copySuccess}
+        onCopy={copyExportCode}
+        onClose={() => {
+          setExportOpen(false)
+          setCopySuccess(false)
+          setExportError(null)
+        }}
+        t={t}
+      />
     </div>
   )
 }

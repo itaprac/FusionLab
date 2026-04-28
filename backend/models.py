@@ -142,6 +142,13 @@ class MLFusionResponse(BaseModel):
     confusionMatrixFusion: Optional[List[List[int]]] = None
 
 
+class MLExportCodeResponse(BaseModel):
+    code: str
+    language: str = "python"
+    filename: str
+    datasetKind: str
+
+
 class MLFusionSearchRequest(BaseModel):
     datasetId: str
     models: List[ClassifierConfig]
