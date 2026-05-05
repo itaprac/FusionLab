@@ -54,6 +54,7 @@
   "calc.calcBtn": "Oblicz fuzję",
   "calc.calculating": "Obliczanie…",
   "calc.error.methods": "Nie udało się wczytać metod",
+  "calc.export.button": "Export code",
   "ml.badge": "Tryb modelowy",
   "ml.title": "Fuzja ML",
   "ml.intro": "Porównaj klasyfikatory na tym samym zbiorze, złącz ich wyjścia i zobacz, jak zachowuje się wynik połączony.",
