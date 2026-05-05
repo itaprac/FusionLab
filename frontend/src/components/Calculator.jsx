@@ -3,6 +3,7 @@ import { useOutletContext, useSearchParams } from 'react-router-dom'
 import MethodSelector from './MethodSelector'
 import SourceCard from './SourceCard'
 import ResultCard from './ResultCard'
+import CodeExportModal from './CodeExportModal'
 import { useLanguage } from '../contexts/LanguageContext'
 
 function Calculator() {
@@ -23,6 +24,12 @@ function Calculator() {
   const [examples, setExamples] = useState([])
   const [selectedExample, setSelectedExample] = useState('')
   const [exampleSelectionMode, setExampleSelectionMode] = useState('manual')
+  const [exportLoading, setExportLoading] = useState(false)
+  const [exportError, setExportError] = useState(null)
+  const [exportedCode, setExportedCode] = useState('')
+  const [exportFilename, setExportFilename] = useState('')
+  const [exportOpen, setExportOpen] = useState(false)
+  const [copySuccess, setCopySuccess] = useState(false)
 
   const getDefaultExampleId = (methodId) => {
     if (methodId === 'dempster') return 'dst_low_conflict'
@@ -144,6 +151,11 @@ function Calculator() {
     setError(null)
     setResult(null)
     setResultMeta(null)
+    setExportError(null)
+    setExportedCode('')
+    setExportFilename('')
+    setExportOpen(false)
+    setCopySuccess(false)
     setLoading(true)
     const meta = methods.find(m => m.id === selectedMethod)
     const reqSources = sources.map(s => ({
@@ -164,6 +176,44 @@ function Calculator() {
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const exportCode = async () => {
+    setExportLoading(true)
+    setExportError(null)
+    setCopySuccess(false)
+    setExportOpen(true)
+
+    const reqSources = sources.map(s => ({
+      name: s.name,
+      masses: Object.fromEntries(s.hypotheses.filter(h => h.name && h.mass).map(h => [h.name, parseFloat(h.mass)])),
+    }))
+
+    try {
+      const res = await fetch('/api/fusion/export-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fusion_method: selectedMethod, sources: reqSources }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Export failed')
+      setExportedCode(data.code || '')
+      setExportFilename(data.filename || '')
+    } catch (err) {
+      setExportError(err.message)
+    } finally {
+      setExportLoading(false)
+    }
+  }
+
+  const copyExportCode = async () => {
+    if (!exportedCode) return
+    try {
+      await navigator.clipboard.writeText(exportedCode)
+      setCopySuccess(true)
+    } catch {
+      setExportError(t('ml.export.copyError'))
     }
   }
 
@@ -255,8 +305,33 @@ function Calculator() {
       </section>
 
       {result && (
-        <ResultCard result={result} methodId={resultMeta?.id} methodName={resultMeta?.name} darkMode={darkMode} />
+        <>
+          <section className="border-t pt-6" style={{ borderColor: 'var(--line)' }}>
+            <div className="flex items-center gap-4">
+              <button type="button" onClick={exportCode} disabled={exportLoading} className="btn btn-secondary">
+                {exportLoading ? t('ml.export.loading') : t('calc.export.button')}
+              </button>
+            </div>
+          </section>
+          <ResultCard result={result} methodId={resultMeta?.id} methodName={resultMeta?.name} darkMode={darkMode} />
+        </>
       )}
+      <CodeExportModal
+        open={exportOpen}
+        loading={exportLoading}
+        error={exportError}
+        code={exportedCode}
+        filename={exportFilename}
+        datasetKind="calculator"
+        copySuccess={copySuccess}
+        onCopy={copyExportCode}
+        onClose={() => {
+          setExportOpen(false)
+          setCopySuccess(false)
+          setExportError(null)
+        }}
+        t={t}
+      />
     </div>
   )
 }

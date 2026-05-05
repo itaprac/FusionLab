@@ -54,6 +54,7 @@
   "calc.calcBtn": "Calculate Fusion",
   "calc.calculating": "Calculating…",
   "calc.error.methods": "Failed to load methods",
+  "calc.export.button": "Export code",
   "ml.badge": "Model workflow",
   "ml.title": "ML Fusion",
   "ml.intro": "Compare classifiers on the same dataset, fuse their outputs, and inspect how the combined result behaves.",

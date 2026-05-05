@@ -52,7 +52,7 @@ from models import (
     ExampleSource,
     GetExamplesResponse,
 )
-from ml_export import generate_builtin_export_code, generate_uploaded_export_code
+from ml_export import generate_builtin_export_code, generate_fusion_calculator_export_code, generate_uploaded_export_code
 from ml_runtime import (
     BUILTIN_DATASETS,
     _classifier_registry,
@@ -287,6 +287,19 @@ def fuse_beliefs(request: FusionRequest) -> FusionResponse:
     return FusionResponse(
         fusion_method=request.fusion_method,
         result=fusion_result
+    )
+
+
+@app.post("/fusion/export-code", response_model=MLExportCodeResponse)
+def export_fusion_code(request: FusionRequest) -> MLExportCodeResponse:
+    code, filename = generate_fusion_calculator_export_code(
+        request.fusion_method,
+        request.sources,
+    )
+    return MLExportCodeResponse(
+        code=code,
+        filename=filename,
+        datasetKind="calculator",
     )
 
 @app.get("/ml/datasets", response_model=GetDataSetsResponse)
