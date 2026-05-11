@@ -60,6 +60,7 @@ from ml_runtime import (
     build_training_model,
     build_uploaded_feature_matrix,
     build_uploaded_preprocessor,
+    assert_ml_dataset_within_limits,
     load_dataset,
     parse_feature_columns_form,
     prepare_uploaded_dataset,
@@ -383,7 +384,7 @@ def calculate_classification_metrics(
     metrics: dict[str, float | None] = {
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "precision": float(precision_score(y_true, y_pred, average="weighted", zero_division=0)),
-        "recall": float(recall_score(y_true, y_pred, average="macro", zero_division=0)),
+        "recall": float(recall_score(y_true, y_pred, average="weighted", zero_division=0)),
         "f1_score": float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
         "roc_auc": None,
     }
@@ -407,6 +408,8 @@ def calculate_classification_metrics(
 
 
 DETAIL_SAMPLE_LIMIT = 150
+MAX_ML_MODELS = 8
+MAX_ML_TRAINING_UNITS = 10_000_000
 
 
 def _majority_vote_labels(y_preds_matrix: np.ndarray, n_classes: int) -> np.ndarray:
@@ -535,8 +538,40 @@ def _parse_model_configs_json(raw: Any) -> list[ClassifierConfig]:
 
 
 FUSION_METHODS_SEARCH = ("dempster", "pcr5", "pcr6")
-MAX_SEARCH_MODELS = 16
-MAX_SEARCH_EVALS = 250_000
+MAX_SEARCH_MODELS = 8
+MAX_SEARCH_EVALS = 1_000
+MAX_SEARCH_FUSION_SAMPLE_EVALS = 500_000
+
+
+def _assert_ml_request_allowed(
+    X: np.ndarray,
+    y: np.ndarray,
+    model_configs: List[ClassifierConfig],
+    *,
+    use_cross_validation: bool,
+    cv_folds: int,
+    context: str,
+) -> None:
+    assert_ml_dataset_within_limits(X, y, context=context)
+
+    n_models = len(model_configs)
+    if n_models < 2:
+        raise HTTPException(status_code=400, detail="Select at least 2 models for ML fusion.")
+    if n_models > MAX_ML_MODELS:
+        raise HTTPException(status_code=400, detail=f"Select at most {MAX_ML_MODELS} models.")
+
+    rows = int(X.shape[0])
+    features = int(X.shape[1]) if getattr(X, "ndim", 0) >= 2 else 1
+    cv_multiplier = cv_folds if use_cross_validation else 1
+    cost_units = rows * max(features, 1) * n_models * cv_multiplier
+    if cost_units > MAX_ML_TRAINING_UNITS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "ML request is too large to train interactively. "
+                "Use fewer rows, features, models, or disable cross-validation."
+            ),
+        )
 
 
 def _count_search_evaluations(n_models: int) -> int:
@@ -583,6 +618,23 @@ def _average_singleton_scores_from_bbas(
     return scores
 
 
+def _average_pairwise_conflict(sample_bbas: List[BeliefMass]) -> float | None:
+    if len(sample_bbas) < 2:
+        return None
+
+    total = 0.0
+    pairs = 0
+    for i, left in enumerate(sample_bbas[:-1]):
+        for right in sample_bbas[i + 1:]:
+            pairs += 1
+            for h1, m1 in left.items():
+                for h2, m2 in right.items():
+                    if not (h1 & h2):
+                        total += float(m1) * float(m2)
+
+    return total / pairs if pairs else None
+
+
 def _run_fusion_on_bbas(
     bbas_per_sample: List[List[BeliefMass]],
     subset_indices: List[int],
@@ -596,9 +648,15 @@ def _run_fusion_on_bbas(
     y_pred: List[int] = []
     fused_scores: List[np.ndarray] = []
     total_conflict = 0.0
+    conflict_count = 0
 
     for idx in range(n_eval):
         sample_bbas = [bbas_per_sample[idx][j] for j in subset_indices]
+        pairwise_conflict = _average_pairwise_conflict(sample_bbas)
+        if pairwise_conflict is not None:
+            total_conflict += pairwise_conflict
+            conflict_count += 1
+
         try:
             if fusion_method == "dempster":
                 try:
@@ -608,7 +666,6 @@ def _run_fusion_on_bbas(
                         raise
                     # Total conflict (K=1): no normalized DST result — use mean singleton masses.
                     singleton_scores = _average_singleton_scores_from_bbas(sample_bbas, class_labels)
-                    total_conflict += 1.0
                     fused_scores.append(singleton_scores)
                     predicted_label = class_labels[int(np.argmax(singleton_scores))]
                     y_pred.append(label_lookup[predicted_label])
@@ -619,9 +676,6 @@ def _run_fusion_on_bbas(
                 fused, conflict = pcr6_fusion(sample_bbas)
             else:
                 raise HTTPException(status_code=400, detail="Unknown fusion method")
-
-            if conflict is not None:
-                total_conflict += conflict
 
             singleton_scores = np.array(
                 [float(fused.get_mass(label)) for label in class_labels],
@@ -666,7 +720,7 @@ def _run_fusion_on_bbas(
         np.asarray(y_pred),
         np.asarray(fused_scores) if fused_scores else None,
     )
-    avg_conflict = (total_conflict / n_eval) if total_conflict > 0 and n_eval > 0 else None
+    avg_conflict = (total_conflict / conflict_count) if conflict_count > 0 else None
     fused_metrics["conflict"] = avg_conflict
     return fused_metrics, np.asarray(y_pred, dtype=int)
 
@@ -829,6 +883,14 @@ def execute_ml_fusion(
         X = X.toarray()
 
     y = np.asarray(y)
+    _assert_ml_request_allowed(
+        X,
+        y,
+        model_configs,
+        use_cross_validation=use_cross_validation,
+        cv_folds=cv_folds,
+        context="Dataset",
+    )
 
     (
         model_ids,
@@ -911,6 +973,17 @@ def _assert_fusion_search_allowed(n_models: int) -> None:
         )
 
 
+def _assert_fusion_search_sample_cost(total: int, n_eval_samples: int) -> None:
+    if total * n_eval_samples > MAX_SEARCH_FUSION_SAMPLE_EVALS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Combination search is too large for this dataset. "
+                "Use fewer models, fewer rows, or disable cross-validation."
+            ),
+        )
+
+
 def iter_fusion_search_entries(
     bbas_per_sample: List[List[BeliefMass]],
     model_ids: List[str],
@@ -964,6 +1037,14 @@ def execute_ml_fusion_search(
     if issparse(X):
         X = X.toarray()
     y = np.asarray(y)
+    _assert_ml_request_allowed(
+        X,
+        y,
+        model_configs,
+        use_cross_validation=use_cross_validation,
+        cv_folds=cv_folds,
+        context="Dataset",
+    )
 
     (
         model_ids,
@@ -986,6 +1067,7 @@ def execute_ml_fusion_search(
         use_cross_validation=use_cross_validation,
         cv_folds=cv_folds,
     )
+    _assert_fusion_search_sample_cost(_count_search_evaluations(n_models), len(y_eval))
 
     entries = [e for _done, _total, e in iter_fusion_search_entries(
         bbas_per_sample,
@@ -1033,6 +1115,14 @@ def _ndjson_stream_ml_fusion_search(
         if issparse(X):
             X = X.toarray()
         y = np.asarray(y)
+        _assert_ml_request_allowed(
+            X,
+            y,
+            model_configs,
+            use_cross_validation=use_cross_validation,
+            cv_folds=cv_folds,
+            context="Dataset",
+        )
 
         (
             model_ids,
@@ -1057,6 +1147,7 @@ def _ndjson_stream_ml_fusion_search(
         )
 
         total = _count_search_evaluations(n_models)
+        _assert_fusion_search_sample_cost(total, len(y_eval))
         throttle = max(1, total // 200)
         last_sent = 0
         entries: List[MLFusionSearchEntry] = []

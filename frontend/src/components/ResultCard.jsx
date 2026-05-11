@@ -20,7 +20,9 @@ function ResultCard({ result, methodId, methodName, darkMode, displayOrder }) {
 
   const winner = [...sortedMasses].sort((a, b) => b[1] - a[1])[0]
   const maxMass = Math.max(...sortedMasses.map(([, m]) => m), 0.01)
-  const conflict = result.conflict !== null ? Number(result.conflict) : null
+  const conflict = result.conflict !== null && result.conflict !== undefined && !Number.isNaN(Number(result.conflict))
+    ? Number(result.conflict)
+    : null
   const resolvedMethodName = methodName || (methodId === 'dempster' ? 'Dempster-Shafer' : methodId === 'pcr5' ? 'PCR5' : methodId === 'pcr6' ? 'PCR6' : '\u2014')
 
   const conflictLevel = conflict === null ? null : conflict < 0.2 ? 'low' : conflict < 0.5 ? 'moderate' : 'high'

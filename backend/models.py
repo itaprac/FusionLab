@@ -103,7 +103,7 @@ class MLFusionResult(BaseModel):
     recall: float
     f1_score: float
     roc_auc: Optional[float] = None
-    conflict: Optional[float]  # None gdy fuzja 3+ modeli (konflikt kumulacyjny)
+    conflict: Optional[float]
 
 class FusionSampleDetail(BaseModel):
     """Single test sample for inspection (labels as human-readable strings)."""

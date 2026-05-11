@@ -1,5 +1,5 @@
 import json
-from textwrap import dedent
+from textwrap import dedent, indent
 
 from models import ClassifierConfig
 from ml_runtime import BUILTIN_DATASET_NAMES, get_builtin_dataset_script_spec, normalize_model_params
@@ -81,6 +81,9 @@ def generate_fusion_calculator_export_code(fusion_method: str, sources: list) ->
 def _build_builtin_imports(dataset_imports: list[str]) -> str:
     lines = [
         "import numpy as np",
+        "from sklearn.base import clone",
+        "from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score",
+        "from sklearn.model_selection import StratifiedKFold, cross_val_predict, train_test_split",
         "from sklearn.pipeline import Pipeline",
         "from sklearn.preprocessing import StandardScaler",
         "from sklearn.svm import SVC",
@@ -102,10 +105,14 @@ def _build_builtin_imports(dataset_imports: list[str]) -> str:
 def _build_uploaded_imports() -> str:
     return "\n".join(
         [
+            "import csv",
             "import numpy as np",
-            "import pandas as pd",
+            "from sklearn.base import clone",
+            "from sklearn.compose import ColumnTransformer",
+            "from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score",
+            "from sklearn.model_selection import StratifiedKFold, cross_val_predict, train_test_split",
             "from sklearn.pipeline import Pipeline",
-            "from sklearn.preprocessing import StandardScaler",
+            "from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler",
             "from sklearn.svm import SVC",
             "from sklearn.neighbors import KNeighborsClassifier",
             "from sklearn.naive_bayes import GaussianNB",
@@ -168,6 +175,16 @@ def _build_classifier_function() -> str:
                     ("clf", MLPClassifier(hidden_layer_sizes=hidden, max_iter=params["max_iter"], random_state=42)),
                 ])
             raise ValueError(f"Unknown model: {model_id}")
+
+
+        def build_training_model(model_id, params, preprocessor=None):
+            model = build_model(model_id, params)
+            if preprocessor is None:
+                return model
+            return Pipeline([
+                ("preprocessor", clone(preprocessor)),
+                ("model", model),
+            ])
         """
     ).strip()
 
@@ -185,64 +202,197 @@ def _build_fusion_helpers() -> str:
             aligned = np.zeros((len(X), len(labels)), dtype=float)
             local_labels = [str(label) for label in model.classes_]
             for i, label in enumerate(local_labels):
-                aligned[:, labels.index(label)] = raw[:, i]
+                if label in labels:
+                    aligned[:, labels.index(label)] = raw[:, i]
             return aligned
+
+
+        def average_singleton_scores(sample_bbas, labels):
+            scores = np.zeros(len(labels), dtype=float)
+            for i, label in enumerate(labels):
+                scores[i] = sum(float(bba.get_mass(label)) for bba in sample_bbas) / len(sample_bbas)
+            total = float(scores.sum())
+            if total > 1e-15:
+                scores /= total
+            else:
+                scores[:] = 1.0 / max(len(labels), 1)
+            return scores
+
+
+        def average_pairwise_conflict(sample_bbas):
+            if len(sample_bbas) < 2:
+                return None
+
+            total = 0.0
+            pairs = 0
+            for i, left in enumerate(sample_bbas[:-1]):
+                for right in sample_bbas[i + 1:]:
+                    pairs += 1
+                    for h1, m1 in left.items():
+                        for h2, m2 in right.items():
+                            if not (h1 & h2):
+                                total += float(m1) * float(m2)
+
+            return total / pairs if pairs else None
 
 
         def fuse_sample(sample_bbas, labels, fusion_method):
             if fusion_method == "dempster":
-                fused, _ = dempster_fusion(sample_bbas)
+                try:
+                    fused, conflict = dempster_fusion(sample_bbas)
+                except ValueError as exc:
+                    if "DST fusion impossible" not in str(exc):
+                        raise
+                    scores = average_singleton_scores(sample_bbas, labels)
+                    return labels[int(np.argmax(scores))], scores, 1.0
             elif fusion_method == "pcr5":
-                fused, _ = pcr5_fusion(sample_bbas)
+                fused, conflict = pcr5_fusion(sample_bbas)
             elif fusion_method == "pcr6":
-                fused, _ = pcr6_fusion(sample_bbas)
+                fused, conflict = pcr6_fusion(sample_bbas)
             else:
                 raise ValueError(f"Unknown fusion method: {fusion_method}")
 
             scores = np.array([float(fused.get_mass(label)) for label in labels], dtype=float)
-            if not np.any(scores):
-                scores[:] = 1.0 / len(labels)
-            return labels[int(np.argmax(scores))]
+            if np.any(scores):
+                predicted_label = labels[int(np.argmax(scores))]
+            else:
+                items = list(fused.items())
+                if items:
+                    best_hypothesis, _ = max(items, key=lambda item: item[1])
+                    predicted_label = str(next(iter(best_hypothesis)))
+                else:
+                    scores = average_singleton_scores(sample_bbas, labels)
+                    predicted_label = labels[int(np.argmax(scores))]
+
+            if predicted_label not in labels:
+                scores = average_singleton_scores(sample_bbas, labels)
+                predicted_label = labels[int(np.argmax(scores))]
+
+            return predicted_label, scores, conflict
+
+
+        def calculate_metrics(y_true, y_pred, y_score=None):
+            metrics = {
+                "accuracy": float(accuracy_score(y_true, y_pred)),
+                "precision": float(precision_score(y_true, y_pred, average="weighted", zero_division=0)),
+                "recall": float(recall_score(y_true, y_pred, average="weighted", zero_division=0)),
+                "f1_score": float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
+                "roc_auc": None,
+            }
+            if y_score is None or len(set(y_true)) < 2:
+                return metrics
+            try:
+                if y_score.ndim == 1:
+                    metrics["roc_auc"] = float(roc_auc_score(y_true, y_score))
+                elif y_score.shape[1] == 2:
+                    metrics["roc_auc"] = float(roc_auc_score(y_true, y_score[:, 1]))
+                else:
+                    metrics["roc_auc"] = float(roc_auc_score(y_true, y_score, multi_class="ovr", average="weighted"))
+            except ValueError:
+                metrics["roc_auc"] = None
+            return metrics
         """
     ).strip()
 
 
-def _build_run_block(dataset_loader: str, is_uploaded: bool) -> str:
-    load_block = "X, y = load_dataset()" if not is_uploaded else "X, y = load_dataset()"
-    return dedent(
-        f"""
-        {dataset_loader}
+def _build_run_block(dataset_loader: str) -> str:
+    run_block = dedent(
+        """
+        def evaluate_holdout(X, y, labels, preprocessor):
+            X_train, X_eval, y_train, y_eval = train_test_split(
+                X,
+                y,
+                test_size=0.25,
+                random_state=42,
+                stratify=y,
+            )
+
+            model_probabilities = []
+            model_predictions = []
+            model_metrics = []
+
+            for model_cfg in MODELS:
+                model = build_training_model(model_cfg["id"], model_cfg["params"], preprocessor)
+                model.fit(X_train, y_train)
+                proba = align_proba(model, X_eval, labels)
+                pred = np.asarray([str(label) for label in model.predict(X_eval)], dtype=object)
+                model_probabilities.append(proba)
+                model_predictions.append(pred)
+                model_metrics.append((model_cfg["id"], calculate_metrics(y_eval, pred, proba)))
+
+            return y_eval, model_probabilities, model_predictions, model_metrics
+
+
+        def evaluate_cross_validation(X, y, labels, preprocessor):
+            if len(X) < CV_FOLDS * 2:
+                raise ValueError(f"Need at least {CV_FOLDS * 2} samples for {CV_FOLDS}-fold cross-validation.")
+
+            cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=42)
+            model_probabilities = []
+            model_predictions = []
+            model_metrics = []
+
+            for model_cfg in MODELS:
+                model = build_training_model(model_cfg["id"], model_cfg["params"], preprocessor)
+                try:
+                    proba = cross_val_predict(model, X, y, cv=cv, method="predict_proba", n_jobs=1)
+                except Exception as exc:
+                    raise ValueError(f"Cross-validation failed for model '{model_cfg['id']}': {exc}") from exc
+                pred = np.asarray([labels[int(i)] for i in np.argmax(proba, axis=1)], dtype=object)
+                model_probabilities.append(proba)
+                model_predictions.append(pred)
+                model_metrics.append((model_cfg["id"], calculate_metrics(y, pred, proba)))
+
+            return y, model_probabilities, model_predictions, model_metrics
+
+
+        def evaluate_fusion(model_probabilities, labels):
+            fused_predictions = []
+            fused_scores = []
+            total_conflict = 0.0
+            conflict_count = 0
+
+            for row_idx in range(len(model_probabilities[0])):
+                sample_bbas = [proba_to_bba(proba[row_idx], labels) for proba in model_probabilities]
+                predicted_label, scores, conflict = fuse_sample(sample_bbas, labels, FUSION_METHOD)
+                fused_predictions.append(predicted_label)
+                fused_scores.append(scores)
+                pairwise_conflict = average_pairwise_conflict(sample_bbas)
+                if pairwise_conflict is not None:
+                    total_conflict += pairwise_conflict
+                    conflict_count += 1
+
+            avg_conflict = total_conflict / conflict_count if conflict_count > 0 else None
+            return np.asarray(fused_predictions, dtype=object), np.asarray(fused_scores), avg_conflict
 
 
         def main():
-            {load_block}
-            labels = sorted({{str(label) for label in y}})
-            trained_models = []
+            X, y, preprocessor = load_dataset()
+            labels = sorted({str(label) for label in y})
+            if USE_CROSS_VALIDATION:
+                evaluation_mode = "cv_oof"
+                y_eval, model_probabilities, model_predictions, model_metrics = evaluate_cross_validation(X, y, labels, preprocessor)
+            else:
+                evaluation_mode = "holdout"
+                y_eval, model_probabilities, model_predictions, model_metrics = evaluate_holdout(X, y, labels, preprocessor)
 
-            for model_cfg in MODELS:
-                model = build_model(model_cfg["id"], model_cfg["params"])
-                model.fit(X, y)
-                trained_models.append((model_cfg["id"], model))
-
-            model_probabilities = []
-            for _model_id, model in trained_models:
-                model_probabilities.append(align_proba(model, X, labels))
-
-            fused_predictions = []
-            for row_idx in range(len(X)):
-                sample_bbas = [proba_to_bba(proba[row_idx], labels) for proba in model_probabilities]
-                fused_predictions.append(fuse_sample(sample_bbas, labels, FUSION_METHOD))
+            fused_predictions, fused_scores, avg_conflict = evaluate_fusion(model_probabilities, labels)
+            fusion_metrics = calculate_metrics(y_eval, fused_predictions, fused_scores)
 
             print("Done.")
+            print("Evaluation mode:", evaluation_mode)
             print("Models:", [model_cfg["id"] for model_cfg in MODELS])
             print("Fusion:", FUSION_METHOD)
-            print("First fused predictions:", fused_predictions[:10])
+            print("Model metrics:", model_metrics)
+            print("Fusion metrics:", {**fusion_metrics, "conflict": avg_conflict})
+            print("First fused predictions:", fused_predictions[:10].tolist())
 
 
         if __name__ == "__main__":
             main()
         """
     ).strip()
+    return f"{dataset_loader}\n\n\n{run_block}"
 
 
 def generate_builtin_export_code(
@@ -252,10 +402,17 @@ def generate_builtin_export_code(
     use_cross_validation: bool,
     cv_folds: int,
 ) -> tuple[str, str]:
-    del use_cross_validation
-    del cv_folds
     dataset_name = BUILTIN_DATASET_NAMES.get(dataset_id, dataset_id)
     dataset_spec = get_builtin_dataset_script_spec(dataset_id)
+    dataset_body = indent(dataset_spec["body"], "    ")
+    dataset_loader = "\n".join(
+        [
+            "def load_dataset():",
+            dataset_body,
+            "    y = np.asarray([str(label) for label in y], dtype=object)",
+            "    return X, y, None",
+        ]
+    )
 
     script = "\n\n".join(
         [
@@ -265,22 +422,14 @@ def generate_builtin_export_code(
                 [
                     f"DATASET_NAME = {dataset_name!r}",
                     f"FUSION_METHOD = {fusion_method!r}",
+                    f"USE_CROSS_VALIDATION = {bool(use_cross_validation)!r}",
+                    f"CV_FOLDS = {int(cv_folds)!r}",
                     f"MODELS = {_build_models_config(models)}",
                 ]
             ),
             _build_classifier_function(),
             _build_fusion_helpers(),
-            _build_run_block(
-                dedent(
-                    f"""
-                    def load_dataset():
-                        {dataset_spec['body']}
-                        y = np.asarray([str(label) for label in y], dtype=object)
-                        return X, y
-                    """
-                ).strip(),
-                is_uploaded=False,
-            ),
+            _build_run_block(dataset_loader),
         ]
     ).strip() + "\n"
 
@@ -298,10 +447,6 @@ def generate_uploaded_export_code(
     use_cross_validation: bool,
     cv_folds: int,
 ) -> tuple[str, str]:
-    del feature_types
-    del use_cross_validation
-    del cv_folds
-
     script = "\n\n".join(
         [
             "# Generated by FusionLab. Minimal runnable export.",
@@ -313,7 +458,10 @@ def generate_uploaded_export_code(
                     f"CSV_PATH = {'YOUR_DATASET_PATH/' + original_filename!r}",
                     f"TARGET_COLUMN = {target_column!r}",
                     f"FEATURE_COLUMNS = {_json_literal(feature_columns)}",
+                    f"FEATURE_TYPES = {_json_literal(feature_types)}",
                     f"FUSION_METHOD = {fusion_method!r}",
+                    f"USE_CROSS_VALIDATION = {bool(use_cross_validation)!r}",
+                    f"CV_FOLDS = {int(cv_folds)!r}",
                     f"MODELS = {_build_models_config(models)}",
                 ]
             ),
@@ -323,17 +471,40 @@ def generate_uploaded_export_code(
                 dedent(
                     """
                     def load_dataset():
-                        df = pd.read_csv(CSV_PATH)
-                        X = pd.get_dummies(df[FEATURE_COLUMNS], drop_first=False)
-                        y = df[TARGET_COLUMN].astype(str).to_numpy()
-                        return X.to_numpy(), y
+                        with open(CSV_PATH, newline="", encoding="utf-8-sig") as csv_file:
+                            rows = list(csv.DictReader(csv_file))
+
+                        y = np.asarray([str(row[TARGET_COLUMN]) for row in rows], dtype=object)
+                        X_rows = []
+                        for row in rows:
+                            X_rows.append([
+                                float(row[column]) if FEATURE_TYPES[column] == "numeric" else str(row[column])
+                                for column in FEATURE_COLUMNS
+                            ])
+                        X = np.asarray(X_rows, dtype=object)
+
+                        numeric_indices = [
+                            i for i, column in enumerate(FEATURE_COLUMNS)
+                            if FEATURE_TYPES[column] == "numeric"
+                        ]
+                        categorical_indices = [
+                            i for i, column in enumerate(FEATURE_COLUMNS)
+                            if FEATURE_TYPES[column] != "numeric"
+                        ]
+                        transformers = []
+                        if numeric_indices:
+                            transformers.append(("numeric", FunctionTransformer(lambda values: np.asarray(values, dtype=float)), numeric_indices))
+                        if categorical_indices:
+                            transformers.append(("categorical", OneHotEncoder(handle_unknown="ignore", sparse_output=False), categorical_indices))
+
+                        preprocessor = ColumnTransformer(transformers=transformers, sparse_threshold=0)
+                        return X, y, preprocessor
                     """
                 ).strip(),
-                is_uploaded=True,
             ),
         ]
     ).strip() + "\n"
 
     stem = original_filename.rsplit(".", 1)[0] if "." in original_filename else original_filename
-    safe_stem = stem.replace(" ", "_").lower() or "custom_dataset"
+    safe_stem = stem.replace("/", "_").replace("\\", "_").replace(" ", "_").lower() or "custom_dataset"
     return script, f"mlfusion_export_{safe_stem}.py"

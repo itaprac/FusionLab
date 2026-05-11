@@ -165,8 +165,9 @@ function ExampleMLFusion() {
               <div className="mt-5 max-w-2xl space-y-3 text-sm leading-7" style={{ color: 'var(--text)' }}>
                 <p>
                   The table below shows each model's test-set metrics alongside the fused result.
-                  Notice how fusion can match or exceed the best single model — it leverages the
-                  complementary strengths of each classifier rather than relying on any one of them.
+                  Precision, recall, and F1 are weighted averages across classes. Notice how fusion
+                  can match or exceed the best single model — it leverages the complementary strengths
+                  of each classifier rather than relying on any one of them.
                 </p>
                 <p>
                   The <strong style={{ color: 'var(--text-strong)' }}>conflict</strong> column
@@ -182,9 +183,9 @@ function ExampleMLFusion() {
                     <tr style={{ color: 'var(--text-muted)', background: 'var(--bg-sunken)' }}>
                       <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Model</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Accuracy</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Precision</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Recall</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">F1</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Weighted precision</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Weighted recall</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Weighted F1</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">ROC AUC</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.1em]">Conflict</th>
                     </tr>

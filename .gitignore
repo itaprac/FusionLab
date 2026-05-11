@@ -5,12 +5,22 @@ build/
 dist/
 wheels/
 *.egg-info
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
 
 # Virtual environments
-.venv
+.venv/
+venv/
 
 # Node
 node_modules/
+coverage/
+.vite/
+.next/
+.nuxt/
+.turbo/
 
 # IDE
 .vscode/

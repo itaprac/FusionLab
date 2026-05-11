@@ -2,6 +2,24 @@ from collections import defaultdict
 from typing import List, Optional
 from ..core.belief_mass import BeliefMass
 
+
+def average_pairwise_conflict(sources: List[BeliefMass]) -> Optional[float]:
+    if len(sources) < 2:
+        return None
+
+    total = 0.0
+    pairs = 0
+    for i, left in enumerate(sources[:-1]):
+        for right in sources[i + 1:]:
+            pairs += 1
+            for h1, m1 in left.items():
+                for h2, m2 in right.items():
+                    if not (h1 & h2):
+                        total += float(m1) * float(m2)
+
+    return total / pairs if pairs else None
+
+
 def combine(bma1: BeliefMass, bma2: BeliefMass) -> tuple[BeliefMass, float]:
     """Combine two belief mass functions using Dempster's rule of combination.
 
@@ -55,8 +73,7 @@ def combine_multiple(sources: List[BeliefMass]) -> tuple[BeliefMass, Optional[fl
             at least 2 sources.
 
     Returns:
-        If there are exactly 2 sources: returns (BeliefMass, conflict) tuple.
-        If more than 2: returns (BeliefMass, None).
+        A tuple with the fused BeliefMass and average pairwise conflict.
 
     Raises:
         ValueError: If fewer than 2 sources are provided.
@@ -70,8 +87,9 @@ def combine_multiple(sources: List[BeliefMass]) -> tuple[BeliefMass, Optional[fl
         result, conflict = combine(sources[0], sources[1])
         return result, conflict
 
+    conflict = average_pairwise_conflict(sources)
     result = sources[0]
     for source in sources[1:]:
         result, _ = combine(result, source)
 
-    return result, None
+    return result, conflict

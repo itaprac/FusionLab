@@ -52,6 +52,14 @@ BUILTIN_DATASETS = [
 
 BUILTIN_DATASET_NAMES = {dataset.id: dataset.name for dataset in BUILTIN_DATASETS}
 TARGET_COLUMN_ALIASES = {"target", "label", "class", "species"}
+MAX_UPLOAD_CSV_BYTES = 2 * 1024 * 1024
+MAX_UPLOAD_CSV_ROWS = 5000
+MAX_UPLOAD_CSV_COLUMNS = 100
+MAX_UPLOAD_CSV_CLASSES = 25
+MAX_ML_DATASET_ROWS = 5000
+MAX_ML_DATASET_FEATURES = 250
+MAX_ML_DATASET_CLASSES = 25
+MAX_ML_DATASET_CELLS = 500_000
 
 BUILTIN_DATASET_SCRIPT_SPECS: dict[str, dict[str, Any]] = {
     "breast_cancer": {
@@ -202,6 +210,13 @@ def load_dataset(dataset_id: str):
 
 
 def read_uploaded_csv(content: bytes) -> tuple[List[str], List[dict[str, str]]]:
+    if len(content) > MAX_UPLOAD_CSV_BYTES:
+        limit_mb = MAX_UPLOAD_CSV_BYTES / (1024 * 1024)
+        raise HTTPException(
+            status_code=400,
+            detail=f"CSV file is too large. Upload at most {limit_mb:.0f} MB.",
+        )
+
     try:
         decoded = content.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
@@ -214,6 +229,13 @@ def read_uploaded_csv(content: bytes) -> tuple[List[str], List[dict[str, str]]]:
     fieldnames = [name.strip() for name in reader.fieldnames if name is not None]
     if not fieldnames:
         raise HTTPException(status_code=400, detail="CSV header row is empty.")
+    if len(fieldnames) > MAX_UPLOAD_CSV_COLUMNS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"CSV has too many columns. Maximum allowed is {MAX_UPLOAD_CSV_COLUMNS}.",
+        )
+    if len(set(fieldnames)) != len(fieldnames):
+        raise HTTPException(status_code=400, detail="CSV header contains duplicate column names.")
     reader.fieldnames = fieldnames
 
     rows: list[dict[str, str]] = []
@@ -232,6 +254,11 @@ def read_uploaded_csv(content: bytes) -> tuple[List[str], List[dict[str, str]]]:
             continue
 
         rows.append(normalized_row)
+        if len(rows) > MAX_UPLOAD_CSV_ROWS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"CSV has too many rows. Maximum allowed is {MAX_UPLOAD_CSV_ROWS}.",
+            )
 
     if not rows:
         raise HTTPException(status_code=400, detail="CSV must contain at least one data row.")
@@ -327,6 +354,11 @@ def prepare_uploaded_dataset(
     classes = sorted(set(target_values))
     if len(classes) < 2:
         raise HTTPException(status_code=400, detail="Dataset must contain at least 2 classes.")
+    if len(classes) > MAX_UPLOAD_CSV_CLASSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Dataset has too many classes. Maximum allowed is {MAX_UPLOAD_CSV_CLASSES}.",
+        )
 
     dataset_id = f"custom_{uuid4().hex[:8]}"
     base_name = os.path.splitext(file_name or "Custom Dataset")[0].replace("_", " ").strip() or "Custom Dataset"
@@ -583,3 +615,36 @@ def build_training_model(
         ("preprocessor", clone(preprocessor)),
         ("model", model),
     ])
+
+
+def assert_ml_dataset_within_limits(
+    X: np.ndarray,
+    y: np.ndarray,
+    *,
+    context: str = "Dataset",
+) -> None:
+    rows = int(X.shape[0]) if getattr(X, "ndim", 0) >= 1 else 0
+    features = int(X.shape[1]) if getattr(X, "ndim", 0) >= 2 else 1
+    classes = int(len(set(np.asarray(y, dtype=object).tolist())))
+    cells = rows * features
+
+    if rows > MAX_ML_DATASET_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{context} has too many rows for ML training. Maximum allowed is {MAX_ML_DATASET_ROWS}.",
+        )
+    if features > MAX_ML_DATASET_FEATURES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{context} has too many feature columns for ML training. Maximum allowed is {MAX_ML_DATASET_FEATURES}.",
+        )
+    if classes > MAX_ML_DATASET_CLASSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{context} has too many classes for ML training. Maximum allowed is {MAX_ML_DATASET_CLASSES}.",
+        )
+    if cells > MAX_ML_DATASET_CELLS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{context} is too large for ML training. Maximum allowed is {MAX_ML_DATASET_CELLS} feature cells.",
+        )

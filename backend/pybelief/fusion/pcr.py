@@ -3,7 +3,25 @@ from typing import List
 import itertools
 from ..core.belief_mass import BeliefMass
 
-def combine(bma1: BeliefMass, bma2: BeliefMass) -> tuple[BeliefMass, None]:
+
+def average_pairwise_conflict(sources: List[BeliefMass]) -> float | None:
+    if len(sources) < 2:
+        return None
+
+    total = 0.0
+    pairs = 0
+    for i, left in enumerate(sources[:-1]):
+        for right in sources[i + 1:]:
+            pairs += 1
+            for h1, m1 in left.items():
+                for h2, m2 in right.items():
+                    if not (h1 & h2):
+                        total += float(m1) * float(m2)
+
+    return total / pairs if pairs else None
+
+
+def combine(bma1: BeliefMass, bma2: BeliefMass) -> tuple[BeliefMass, float]:
     """Combine two belief mass functions using the PCR5 rule.
 
     Implements the Proportional Conflict Redistribution rule (PCR5) from
@@ -18,7 +36,7 @@ def combine(bma1: BeliefMass, bma2: BeliefMass) -> tuple[BeliefMass, None]:
     Returns:
         A tuple containing:
             BeliefMass: The combined and normalized belief mass after proportional conflict redistribution.
-            None: Conflict is not returned for PCR5.
+            float: Pairwise conflict mass before redistribution.
     """
     result_map = defaultdict(float)
     conflict = 0.0
@@ -40,9 +58,9 @@ def combine(bma1: BeliefMass, bma2: BeliefMass) -> tuple[BeliefMass, None]:
                     result_map[h1] += (m1 * prod) / sum_m
                     result_map[h2] += (m2 * prod) / sum_m
 
-    return BeliefMass(result_map).normalize(), None
+    return BeliefMass(result_map).normalize(), conflict
 
-def combine_multiple(sources: List[BeliefMass]) -> tuple[BeliefMass, None]:
+def combine_multiple(sources: List[BeliefMass]) -> tuple[BeliefMass, float | None]:
     """Combine multiple belief mass functions using the PCR5 rule.
 
     Sequentially applies the PCR5 combination rule to fuse multiple
@@ -55,7 +73,7 @@ def combine_multiple(sources: List[BeliefMass]) -> tuple[BeliefMass, None]:
     Returns:
         A tuple containing:
             BeliefMass: The combined belief mass from all sources.
-            None: Conflict is not returned for PCR5.
+            float: Average pairwise conflict before redistribution.
 
     Raises:
         ValueError: If fewer than 2 sources are provided.
@@ -63,15 +81,16 @@ def combine_multiple(sources: List[BeliefMass]) -> tuple[BeliefMass, None]:
     if len(sources) < 2:
         raise ValueError("At least 2 sources are required for fusion.")
 
+    conflict = average_pairwise_conflict(sources)
     result = sources[0]
     for source in sources[1:]:
         result, _ = combine(result, source)
 
-    return result, None
+    return result, conflict
 
 
 
-def combine_multiple_pcr6(sources: List[BeliefMass]) -> tuple[BeliefMass, None]:
+def combine_multiple_pcr6(sources: List[BeliefMass]) -> tuple[BeliefMass, float | None]:
     """
     PCR6 combination rule for multiple belief mass functions.
     Based on Smarandache & Dezert DSmT definition.
@@ -129,4 +148,4 @@ def combine_multiple_pcr6(sources: List[BeliefMass]) -> tuple[BeliefMass, None]:
 
             result_map[h_i] += redistributed
 
-    return BeliefMass(result_map), None
+    return BeliefMass(result_map), average_pairwise_conflict(sources)
