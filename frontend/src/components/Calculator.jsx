@@ -4,7 +4,49 @@ import MethodSelector from './MethodSelector'
 import SourceCard from './SourceCard'
 import ResultCard from './ResultCard'
 import CodeExportModal from './CodeExportModal'
+import ExperimentHistoryPanel from './ExperimentHistoryPanel'
 import { useLanguage } from '../contexts/LanguageContext'
+
+const CALCULATOR_HISTORY_KEY = 'fusionLab.calculatorHistory'
+const CALCULATOR_HISTORY_LIMIT = 10
+
+const emptySources = [
+  { id: 1, name: 'Source 1', hypotheses: [{ name: '', mass: '' }] },
+  { id: 2, name: 'Source 2', hypotheses: [{ name: '', mass: '' }] },
+]
+
+function readCalculatorHistory() {
+  if (typeof window === 'undefined') return []
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CALCULATOR_HISTORY_KEY) || '[]')
+    return Array.isArray(parsed) ? parsed.slice(0, CALCULATOR_HISTORY_LIMIT) : []
+  } catch {
+    return []
+  }
+}
+
+function sourceStateFromHistory(sources) {
+  if (!Array.isArray(sources) || sources.length === 0) return emptySources
+  return sources.map((source, idx) => {
+    const masses = source?.masses || {}
+    const hypotheses = Object.entries(masses).map(([name, mass]) => ({
+      name,
+      mass: mass?.toString?.() ?? String(mass),
+    }))
+    return {
+      id: idx + 1,
+      name: source?.name || `Source ${idx + 1}`,
+      hypotheses: hypotheses.length ? hypotheses : [{ name: '', mass: '' }],
+    }
+  })
+}
+
+function snapshotSourcesForResult(sources) {
+  return sources.map(s => ({
+    name: s.name,
+    hypotheses: s.hypotheses.map(h => ({ name: h.name, mass: h.mass })),
+  }))
+}
 
 function Calculator() {
   const { darkMode } = useOutletContext()
@@ -13,13 +55,11 @@ function Calculator() {
 
   const [methods, setMethods] = useState([])
   const [selectedMethod, setSelectedMethod] = useState('')
-  const [sources, setSources] = useState([
-    { id: 1, name: 'Source 1', hypotheses: [{ name: '', mass: '' }] },
-    { id: 2, name: 'Source 2', hypotheses: [{ name: '', mass: '' }] },
-  ])
+  const [sources, setSources] = useState(emptySources)
   const [result, setResult] = useState(null)
   const [resultMeta, setResultMeta] = useState(null)
   const [resultSources, setResultSources] = useState(null)
+  const [history, setHistory] = useState(readCalculatorHistory)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
   const [examples, setExamples] = useState([])
@@ -112,6 +152,60 @@ function Calculator() {
     })))
   }
 
+  const persistHistory = (nextHistory) => {
+    setHistory(nextHistory)
+    if (typeof window === 'undefined') return
+    localStorage.setItem(CALCULATOR_HISTORY_KEY, JSON.stringify(nextHistory))
+  }
+
+  const saveExperiment = (data, reqSources, meta) => {
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: new Date().toISOString(),
+      fusionMethod: selectedMethod,
+      fusionMethodName: meta?.name || selectedMethod,
+      sources: reqSources,
+      result: data.result,
+    }
+    persistHistory([entry, ...history].slice(0, CALCULATOR_HISTORY_LIMIT))
+  }
+
+  const loadExperiment = (entry) => {
+    const loadedSources = sourceStateFromHistory(entry.sources)
+    setExampleSelectionMode('manual')
+    setSelectedExample('')
+    setSelectedMethod(entry.fusionMethod)
+    setSources(loadedSources)
+    setResult(entry.result)
+    setResultMeta({ id: entry.fusionMethod, name: entry.fusionMethodName })
+    setResultSources(snapshotSourcesForResult(loadedSources))
+    setError(null)
+    setExportError(null)
+    setExportedCode('')
+    setExportFilename('')
+    setExportOpen(false)
+    setCopySuccess(false)
+  }
+
+  const removeExperiment = (id) => {
+    persistHistory(history.filter(entry => entry.id !== id))
+  }
+
+  const formatHistoryDate = (value) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return ''
+    return date.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+  }
+
+  const getHistorySummary = (entry) => {
+    const masses = Object.entries(entry.result?.masses || {})
+    if (!masses.length) return t('calc.history.noResult')
+    const [name, mass] = masses.reduce((best, current) => (
+      Number(current[1]) > Number(best[1]) ? current : best
+    ), masses[0])
+    return `${name}: ${(Number(mass) * 100).toFixed(1)}%`
+  }
+
   const addSource = () => {
     const newId = Math.max(...sources.map(s => s.id)) + 1
     setSources([...sources, { id: newId, name: `Source ${newId}`, hypotheses: [{ name: '', mass: '' }] }])
@@ -176,10 +270,8 @@ function Calculator() {
       setResultMeta({ id: selectedMethod, name: meta?.name })
       // Snapshot inputs so the conflict panel stays in sync with the displayed result
       // even if the user edits the sources afterwards.
-      setResultSources(sources.map(s => ({
-        name: s.name,
-        hypotheses: s.hypotheses.map(h => ({ name: h.name, mass: h.mass })),
-      })))
+      setResultSources(snapshotSourcesForResult(sources))
+      saveExperiment(data, reqSources, meta)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -253,6 +345,21 @@ function Calculator() {
           </select>
         </section>
       )}
+
+      <ExperimentHistoryPanel
+        title={t('calc.history.title')}
+        count={history.length}
+        limit={CALCULATOR_HISTORY_LIMIT}
+        emptyText={t('calc.history.empty')}
+        entries={history}
+        loadLabel={t('calc.history.load')}
+        deleteLabel={t('calc.history.delete')}
+        onLoad={loadExperiment}
+        onDelete={removeExperiment}
+        getTitle={(entry) => entry.fusionMethodName || entry.fusionMethod}
+        getMeta={(entry) => `${formatHistoryDate(entry.createdAt)} · ${entry.sources?.length || 0} ${t('calc.history.sources')}`}
+        getSummary={getHistorySummary}
+      />
 
       <section className="border-t pt-6" style={{ borderColor: 'var(--line)' }}>
         <div className="flex items-center gap-2 mb-1">

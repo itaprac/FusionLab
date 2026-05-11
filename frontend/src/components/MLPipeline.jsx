@@ -1,7 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import MethodSelector from './MethodSelector'
 import CodeExportModal from './CodeExportModal'
+import ExperimentHistoryPanel from './ExperimentHistoryPanel'
 import { useLanguage } from '../contexts/LanguageContext'
+
+const ML_HISTORY_KEY = 'fusionLab.mlHistory'
+const ML_HISTORY_LIMIT = 10
+
+function readMLHistory() {
+  if (typeof window === 'undefined') return []
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ML_HISTORY_KEY) || '[]')
+    return Array.isArray(parsed) ? parsed.slice(0, ML_HISTORY_LIMIT) : []
+  } catch {
+    return []
+  }
+}
 
 function defaultsFromSchema(schema) {
   const o = {}
@@ -199,10 +213,12 @@ function MLPipeline() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [results, setResults] = useState(null)
+  const [resultContext, setResultContext] = useState(null)
   const [sampleAnalysis, setSampleAnalysis] = useState(null)
   const [evaluationMode, setEvaluationMode] = useState('holdout')
   const [classLabels, setClassLabels] = useState([])
   const [confusionMatrixFusion, setConfusionMatrixFusion] = useState(null)
+  const [history, setHistory] = useState(readMLHistory)
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchError, setSearchError] = useState(null)
   const [searchData, setSearchData] = useState(null)
@@ -234,6 +250,10 @@ function MLPipeline() {
   const shouldScrollToFusionControlsRef = useRef(false)
   const visibleDatasets = customDataset ? [...datasets, customDataset.dataset] : datasets
 
+  const getDatasetLabel = (id) => visibleDatasets.find((d) => d.id === id)?.name || id
+  const getMethodLabel = (id) => methods.find((m) => m.id === id)?.name || id
+  const getModelLabel = (id) => models.find((m) => m.id === id)?.name || id
+
   const fmtPct = (v) => {
     if (v === null || v === undefined || Number.isNaN(Number(v))) return '-'
     return `${(Number(v) * 100).toFixed(2)}%`
@@ -242,6 +262,77 @@ function MLPipeline() {
   const fmtDec = (v) => {
     if (v === null || v === undefined || Number.isNaN(Number(v))) return '-'
     return Number(v).toFixed(2)
+  }
+
+  const formatHistoryDate = (value) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return ''
+    return date.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+  }
+
+  const persistHistory = (nextHistory) => {
+    setHistory(nextHistory)
+    if (typeof window === 'undefined') return
+    localStorage.setItem(ML_HISTORY_KEY, JSON.stringify(nextHistory))
+  }
+
+  const saveExperiment = (data, payloadModels, context) => {
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: new Date().toISOString(),
+      datasetId: selectedDataset,
+      datasetName: context.datasetName,
+      fusionMethod: selectedMethod,
+      fusionMethodName: context.fusionMethodName,
+      models: payloadModels.map((model) => ({
+        ...model,
+        name: getModelLabel(model.id),
+      })),
+      useCV,
+      cvFolds,
+      results: data.results,
+      sampleAnalysis: data.sample_analysis ?? null,
+      evaluationMode: data.evaluationMode || 'holdout',
+      classLabels: data.classLabels || [],
+      confusionMatrixFusion: data.confusionMatrixFusion ?? null,
+    }
+    persistHistory([entry, ...history].slice(0, ML_HISTORY_LIMIT))
+  }
+
+  const loadExperiment = (entry) => {
+    const loadedModels = Array.isArray(entry.models) ? entry.models : []
+    setSelectedDataset(entry.datasetId)
+    setSelectedModels(loadedModels.map((model) => model.id))
+    setModelParams(Object.fromEntries(loadedModels.map((model) => [model.id, model.params || {}])))
+    setSelectedMethod(entry.fusionMethod)
+    setUseCV(Boolean(entry.useCV))
+    setCvFolds(entry.cvFolds || 5)
+    setResults(entry.results || [])
+    setSampleAnalysis(entry.sampleAnalysis ?? null)
+    setEvaluationMode(entry.evaluationMode || 'holdout')
+    setClassLabels(entry.classLabels || [])
+    setConfusionMatrixFusion(entry.confusionMatrixFusion ?? null)
+    setResultContext({
+      datasetName: entry.datasetName || entry.datasetId,
+      fusionMethodName: entry.fusionMethodName || entry.fusionMethod,
+      modelNames: loadedModels.map((model) => model.name || model.id),
+    })
+    setError(null)
+    setSearchError(null)
+    setSearchData(null)
+    resetExportState()
+    shouldScrollToFusionResultsRef.current = true
+  }
+
+  const removeExperiment = (id) => {
+    persistHistory(history.filter((entry) => entry.id !== id))
+  }
+
+  const getHistorySummary = (entry) => {
+    const fusionRow = (entry.results || []).find((row) => row.kind === 'fusion')
+    const accuracy = fusionRow ? fmtPct(fusionRow.accuracy) : t('ml.history.noResult')
+    const modelCount = entry.models?.length || 0
+    return `${accuracy} · ${modelCount} ${t('ml.history.models')}`
   }
 
   const loadDatasets = async (preferred = null) => {
@@ -408,6 +499,7 @@ function MLPipeline() {
     }
     setError(null)
     setResults(null)
+    setResultContext(null)
     setSampleAnalysis(null)
     setClassLabels([])
     setConfusionMatrixFusion(null)
@@ -442,12 +534,19 @@ function MLPipeline() {
       }
       const d = await r.json()
       if (!r.ok) throw new Error(d.detail || t('ml.err.generic'))
+      const nextContext = {
+        datasetName: getDatasetLabel(selectedDataset),
+        fusionMethodName: getMethodLabel(selectedMethod),
+        modelNames: selectedModels.map(getModelLabel),
+      }
       shouldScrollToFusionResultsRef.current = true
       setResults(d.results)
+      setResultContext(nextContext)
       setSampleAnalysis(d.sample_analysis ?? null)
       setEvaluationMode(d.evaluationMode || 'holdout')
       setClassLabels(d.classLabels || [])
       setConfusionMatrixFusion(d.confusionMatrixFusion ?? null)
+      saveExperiment(d, payloadModels, nextContext)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -464,6 +563,7 @@ function MLPipeline() {
     setSearchData(null)
     setError(null)
     setResults(null)
+    setResultContext(null)
     setSampleAnalysis(null)
     setClassLabels([])
     setConfusionMatrixFusion(null)
@@ -652,6 +752,21 @@ function MLPipeline() {
         <h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em]" style={{ color: 'var(--text-strong)' }}>{t('ml.title')}</h1>
         <p className="mt-2 max-w-2xl text-sm leading-7" style={{ color: 'var(--text)' }}>{t('ml.intro')}</p>
       </div>
+
+      <ExperimentHistoryPanel
+        title={t('ml.history.title')}
+        count={history.length}
+        limit={ML_HISTORY_LIMIT}
+        emptyText={t('ml.history.empty')}
+        entries={history}
+        loadLabel={t('ml.history.load')}
+        deleteLabel={t('ml.history.delete')}
+        onLoad={loadExperiment}
+        onDelete={removeExperiment}
+        getTitle={(entry) => entry.datasetName || entry.datasetId}
+        getMeta={(entry) => `${formatHistoryDate(entry.createdAt)} · ${entry.fusionMethodName || entry.fusionMethod}`}
+        getSummary={getHistorySummary}
+      />
 
       <section className="border-t pt-6" style={{ borderColor: 'var(--line)' }}>
         <div className="flex items-center gap-2 mb-1">
@@ -1088,7 +1203,7 @@ function MLPipeline() {
               <p className="label">{t('ml.detail.title')}</p>
               <div className="flex items-center gap-3">
                 <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {visibleDatasets.find((d) => d.id === selectedDataset)?.name || selectedDataset} · {methods.find((m) => m.id === selectedMethod)?.name || selectedMethod}
+                  {resultContext?.datasetName || getDatasetLabel(selectedDataset)} · {resultContext?.fusionMethodName || getMethodLabel(selectedMethod)}
                 </p>
                 <button type="button" onClick={exportCode} disabled={exportLoading || loading} className="btn btn-secondary text-xs">
                   {exportLoading ? t('ml.export.loading') : t('ml.export.button')}
