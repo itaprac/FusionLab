@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "node node_modules/vite/bin/vite.js",
     "build": "node node_modules/vite/bin/vite.js build",
-    "preview": "node node_modules/vite/bin/vite.js preview"
+    "preview": "node node_modules/vite/bin/vite.js preview",
+    "video:studio": "remotion studio src/remotion/index.jsx",
+    "video:still": "remotion still src/remotion/index.jsx FusionLabLaunch --frame=120 --scale=0.25",
+    "video:render": "remotion render src/remotion/index.jsx FusionLabLaunch ../dist/fusionlab-launch.mp4"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -15,9 +18,11 @@
     "recharts": "^2.15.0"
   },
   "devDependencies": {
+    "@remotion/cli": "^4.0.456",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
+    "remotion": "^4.0.456",
     "tailwindcss": "^3.4.17",
     "vite": "^6.0.6"
   }
