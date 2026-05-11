@@ -19,6 +19,7 @@ function Calculator() {
   ])
   const [result, setResult] = useState(null)
   const [resultMeta, setResultMeta] = useState(null)
+  const [resultSources, setResultSources] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
   const [examples, setExamples] = useState([])
@@ -151,6 +152,7 @@ function Calculator() {
     setError(null)
     setResult(null)
     setResultMeta(null)
+    setResultSources(null)
     setExportError(null)
     setExportedCode('')
     setExportFilename('')
@@ -172,6 +174,12 @@ function Calculator() {
       if (!res.ok) throw new Error(data.detail || 'Fusion failed')
       setResult(data.result)
       setResultMeta({ id: selectedMethod, name: meta?.name })
+      // Snapshot inputs so the conflict panel stays in sync with the displayed result
+      // even if the user edits the sources afterwards.
+      setResultSources(sources.map(s => ({
+        name: s.name,
+        hypotheses: s.hypotheses.map(h => ({ name: h.name, mass: h.mass })),
+      })))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -313,7 +321,13 @@ function Calculator() {
               </button>
             </div>
           </section>
-          <ResultCard result={result} methodId={resultMeta?.id} methodName={resultMeta?.name} darkMode={darkMode} />
+          <ResultCard
+            result={result}
+            methodId={resultMeta?.id}
+            methodName={resultMeta?.name}
+            darkMode={darkMode}
+            conflictSources={resultSources}
+          />
         </>
       )}
       <CodeExportModal
