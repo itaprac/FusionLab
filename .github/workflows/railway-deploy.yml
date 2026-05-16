@@ -1,0 +1,51 @@
+name: Railway Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Railway environment name
+        required: true
+        default: production
+
+jobs:
+  deploy:
+    name: Deploy to Railway
+    runs-on: ubuntu-latest
+
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+      RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Railway CLI
+        run: npm install --global @railway/cli
+
+      - name: Deploy
+        shell: bash
+        run: |
+          : "${RAILWAY_TOKEN:?Set the RAILWAY_TOKEN repository secret.}"
+          : "${RAILWAY_PROJECT_ID:?Set the RAILWAY_PROJECT_ID repository secret.}"
+
+          args=(
+            up
+            --project "$RAILWAY_PROJECT_ID"
+            --environment "${{ inputs.environment }}"
+            --detach
+            -m "GitHub Actions deploy ${GITHUB_SHA::7}"
+          )
+
+          if [ -n "$RAILWAY_SERVICE" ]; then
+            args+=(--service "$RAILWAY_SERVICE")
+          fi
+
+          railway "${args[@]}"

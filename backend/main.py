@@ -1,8 +1,11 @@
 import json
+import os
+from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import numpy as np
 from itertools import combinations
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
@@ -186,17 +189,43 @@ EXAMPLES = [
 
 app = FastAPI()
 
+
+@app.middleware("http")
+async def strip_api_prefix(request: Request, call_next):
+    if request.scope["path"].startswith("/api/"):
+        request.scope["path"] = request.scope["path"][4:]
+    return await call_next(request)
+
+
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+
+def get_cors_origins() -> List[str]:
+    configured_origins = os.getenv("CORS_ORIGINS", "")
+    extra_origins = [
+        origin.strip()
+        for origin in configured_origins.split(",")
+        if origin.strip()
+    ]
+    return DEFAULT_CORS_ORIGINS + extra_origins
+
+
 # Konfiguracja CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/healthz")
+def healthz() -> Dict[str, str]:
+    return {"status": "ok"}
 
 # Endpoint z przykładami dla kalkulatora
 @app.get("/examples", response_model=GetExamplesResponse)
@@ -1447,3 +1476,26 @@ async def ml_search_upload_stream(
         ),
         media_type="application/x-ndjson",
     )
+
+
+FRONTEND_DIST_DIR = Path(
+    os.getenv(
+        "FRONTEND_DIST_DIR",
+        Path(__file__).resolve().parents[1] / "frontend" / "dist",
+    )
+).resolve()
+
+if FRONTEND_DIST_DIR.exists():
+    assets_dir = FRONTEND_DIST_DIR / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_frontend(full_path: str) -> FileResponse:
+        requested_path = (FRONTEND_DIST_DIR / full_path).resolve()
+        is_inside_dist = requested_path == FRONTEND_DIST_DIR or FRONTEND_DIST_DIR in requested_path.parents
+
+        if full_path and is_inside_dist and requested_path.is_file():
+            return FileResponse(requested_path)
+
+        return FileResponse(FRONTEND_DIST_DIR / "index.html")
