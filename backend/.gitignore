@@ -5,6 +5,20 @@ build/
 dist/
 wheels/
 *.egg-info
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
 
 # Virtual environments
 .venv
+venv/
+
+# IDE
+.vscode/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log

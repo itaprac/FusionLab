@@ -17,8 +17,7 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir uv
 
-COPY backend/pyproject.toml backend/uv.lock backend/README.md ./backend/
-COPY iris.csv heart.csv ./
+COPY backend/pyproject.toml backend/uv.lock ./backend/
 
 WORKDIR /app/backend
 RUN uv sync --locked --no-install-project

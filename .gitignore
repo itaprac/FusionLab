@@ -9,6 +9,9 @@ wheels/
 .mypy_cache/
 .ruff_cache/
 .cache/
+.playwright-cli/
+output/
+*.log
 
 # Virtual environments
 .venv/
@@ -24,7 +27,15 @@ coverage/
 
 # IDE
 .vscode/
+.claude/
+.codex/
 
 
 # Mac OS
 .DS_Store
+
+# Root-level files created by running tools in the wrong directory
+/package-lock.json
+
+# Local datasets and exports
+*.csv

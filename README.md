@@ -196,10 +196,6 @@ FusionLab/
 │   ├── package.json
 │   └── vite.config.js
 │
-├── AUDIT.md                 # Code & UX audit report
-├── presentation-outline.md  # Presentation structure
-├── heart.csv                # Sample dataset
-├── iris.csv                 # Sample dataset
 └── README.md                # This file
 ```
 
