@@ -4,12 +4,9 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
-from pybelief import dempster
 from itertools import combinations
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
-from pybelief.core.belief_mass import BeliefMass
-from pybelief.fusion.dempster import combine_multiple as dempster_fusion
-from pybelief.fusion.pcr import combine_multiple as pcr5_fusion, combine_multiple_pcr6 as pcr6_fusion
+from evidencelib import MassFunction as BeliefMass
 
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import (
@@ -52,6 +49,17 @@ from models import (
     ExampleSource,
     GetExamplesResponse,
 )
+from belief_adapter import (
+    FUSION_RULE_DESCRIPTIONS,
+    FUSION_RULE_ORDER,
+    build_dst_frame_from_labels,
+    build_mass,
+    build_masses_from_singletons,
+    combine_masses,
+    get_singleton_mass,
+    mass_to_response,
+    pignistic_scores,
+)
 from ml_export import generate_builtin_export_code, generate_fusion_calculator_export_code, generate_uploaded_export_code
 from ml_runtime import (
     BUILTIN_DATASETS,
@@ -67,23 +75,16 @@ from ml_runtime import (
     read_uploaded_csv,
 )
 
+
 #Funkcje dostepne w API
 METHODS = [
     Methods(
-        id="dempster",
-        name="Dempster-Shafer Theory (DST)",
-        description="Classic Dempster's rule with normalization of conflict. Works well when evidence sources have low conflict."
-    ),
-    Methods(
-        id="pcr5",
-        name="PCR5 (DSmT)",
-        description="Proportional Conflict Redistribution (PCR5). Redistributes conflict instead of normalizing it, handling high-conflict evidence more robustly."
-    ),
-    Methods(
-        id="pcr6",
-        name="PCR6 (DSmT)",
-        description="Proportional Conflict Redistribution (PCR6). Redistributes conflict for 3+ sources proportionally to contributing masses."
+        id=method_id,
+        name=FUSION_RULE_DESCRIPTIONS[method_id]["name"],
+        description=FUSION_RULE_DESCRIPTIONS[method_id]["description"],
+        category=FUSION_RULE_DESCRIPTIONS[method_id]["category"],
     )
+    for method_id in FUSION_RULE_ORDER
 ]
 
 # Przykłady dla kalkulatora
@@ -236,13 +237,7 @@ def fuse_beliefs(request: FusionRequest) -> FusionResponse:
     """
 
 
-    fusion_methods = {
-        "dempster": dempster_fusion,
-        "pcr5": pcr5_fusion,
-        "pcr6": pcr6_fusion
-    }
-
-    if request.fusion_method not in fusion_methods:
+    if request.fusion_method not in FUSION_RULE_DESCRIPTIONS:
         raise HTTPException(
             status_code=400,
             detail=f"Fusion method '{request.fusion_method}' is not supported."
@@ -256,24 +251,18 @@ def fuse_beliefs(request: FusionRequest) -> FusionResponse:
     )
 
 
-    # Konwersja danych wejściowych na obiekty BeliefMass
-    belief_masses = []
-
-    for source in request.sources:
-
-        #walidacja sumy mas
-        total_mass = sum(source.masses.values())
-        if total_mass > 1.0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Function '{source.name}' has total mass {total_mass}, which exceeds 1.0."
-        )
-        mass_map = {frozenset([k]): v for k, v in source.masses.items()}
-        belief_masses.append(BeliefMass(mass_map))
+    # Konwersja danych wejściowych na obiekty evidencelib.
+    try:
+        belief_masses = build_masses_from_singletons([source.masses for source in request.sources])
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        ) from e
 
     # Wykonanie fuzji
     try:
-        combined_belief, conflict = fusion_methods[request.fusion_method](belief_masses)
+        combined_belief, conflict = combine_masses(belief_masses, request.fusion_method)
     except Exception as e:
         raise HTTPException(
                 status_code=400,
@@ -282,7 +271,7 @@ def fuse_beliefs(request: FusionRequest) -> FusionResponse:
 
 
     # Przygotowanie odpowiedzi
-    result_masses = {','.join(sorted(k)): v for k, v in combined_belief.items()}
+    result_masses = mass_to_response(combined_belief)
     fusion_result = FusionResult(masses=result_masses, conflict=conflict)
 
     return FusionResponse(
@@ -368,12 +357,11 @@ def get_classifiers() -> GetClassifiersResponse:
 #---------------Fuzja w ML-----------------
 #funkcje pomocnicze
 
-def proba_to_bba(proba: np.ndarray, class_labels: List[str]) -> BeliefMass:
-    masses = {}
-    for i, label in enumerate(class_labels):
-        masses[frozenset([label])] = float(proba[i])
-
-    return BeliefMass(masses).normalize() #NIE JESTEM pewna co do normalize(), czy nie usunąć!-------
+def proba_to_bba(proba: np.ndarray, class_labels: List[str], frame=None) -> BeliefMass:
+    masses = {label: float(proba[i]) for i, label in enumerate(class_labels)}
+    if frame is None:
+        return build_masses_from_singletons([masses])[0]
+    return build_mass(frame, masses)
 
 
 def calculate_classification_metrics(
@@ -577,21 +565,27 @@ def _assert_ml_request_allowed(
 def _count_search_evaluations(n_models: int) -> int:
     if n_models < 2:
         return 0
-    n_subsets = 2**n_models - n_models - 1
-    return n_subsets * len(FUSION_METHODS_SEARCH)
+    total = 0
+    for r in range(2, n_models + 1):
+        subset_count = len(list(combinations(range(n_models), r)))
+        total += subset_count * 2  # dempster + pcr6
+        if r == 2:
+            total += subset_count  # pcr5 is defined for exactly two sources
+    return total
 
 
 def _build_bbas_per_sample(
     model_probabilities: List[np.ndarray],
     class_labels: List[str],
 ) -> List[List[BeliefMass]]:
+    frame = build_dst_frame_from_labels(class_labels)
     n_eval = model_probabilities[0].shape[0]
     bbas_per_sample: List[List[BeliefMass]] = []
     for i in range(n_eval):
         sample_bbas = []
         for model_proba in model_probabilities:
             proba = model_proba[i]
-            bba = proba_to_bba(proba, class_labels)
+            bba = proba_to_bba(proba, class_labels, frame)
             sample_bbas.append(bba)
         bbas_per_sample.append(sample_bbas)
     return bbas_per_sample
@@ -609,7 +603,7 @@ def _average_singleton_scores_from_bbas(
     n = len(sample_bbas)
     scores = np.zeros(len(class_labels), dtype=float)
     for j, label in enumerate(class_labels):
-        scores[j] = sum(float(bba.get_mass(label)) for bba in sample_bbas) / n
+        scores[j] = sum(get_singleton_mass(bba, label) for bba in sample_bbas) / n
     s = float(scores.sum())
     if s > 1e-15:
         scores /= s
@@ -652,54 +646,36 @@ def _run_fusion_on_bbas(
 
     for idx in range(n_eval):
         sample_bbas = [bbas_per_sample[idx][j] for j in subset_indices]
-        pairwise_conflict = _average_pairwise_conflict(sample_bbas)
-        if pairwise_conflict is not None:
-            total_conflict += pairwise_conflict
-            conflict_count += 1
 
         try:
-            if fusion_method == "dempster":
-                try:
-                    fused, conflict = dempster_fusion(sample_bbas)
-                except ValueError as ve:
-                    if "DST fusion impossible" not in str(ve):
-                        raise
-                    # Total conflict (K=1): no normalized DST result — use mean singleton masses.
-                    singleton_scores = _average_singleton_scores_from_bbas(sample_bbas, class_labels)
-                    fused_scores.append(singleton_scores)
-                    predicted_label = class_labels[int(np.argmax(singleton_scores))]
-                    y_pred.append(label_lookup[predicted_label])
-                    continue
-            elif fusion_method == "pcr5":
-                fused, conflict = pcr5_fusion(sample_bbas)
-            elif fusion_method == "pcr6":
-                fused, conflict = pcr6_fusion(sample_bbas)
-            else:
-                raise HTTPException(status_code=400, detail="Unknown fusion method")
-
-            singleton_scores = np.array(
-                [float(fused.get_mass(label)) for label in class_labels],
-                dtype=float,
-            )
-            fused_scores.append(singleton_scores)
-
-            if np.any(singleton_scores):
-                predicted_label = class_labels[int(np.argmax(singleton_scores))]
-            else:
-                items = list(fused.items())
-                if items:
-                    best_hyp, _ = max(items, key=lambda x: x[1])
-                    predicted_label = next(iter(best_hyp))
-                else:
-                    singleton_scores = _average_singleton_scores_from_bbas(sample_bbas, class_labels)
-                    predicted_label = class_labels[int(np.argmax(singleton_scores))]
-                    fused_scores[-1] = singleton_scores
-
-            if predicted_label not in label_lookup:
+            try:
+                fused, conflict = combine_masses(sample_bbas, fusion_method)
+            except ValueError as ve:
+                if fusion_method != "dempster" or "DST fusion impossible" not in str(ve):
+                    raise
+                # Total conflict (K=1): no normalized DST result — use mean singleton masses.
                 singleton_scores = _average_singleton_scores_from_bbas(sample_bbas, class_labels)
+                fused_scores.append(singleton_scores)
                 predicted_label = class_labels[int(np.argmax(singleton_scores))]
-                fused_scores[-1] = singleton_scores
+                y_pred.append(label_lookup[predicted_label])
+                total_conflict += 1.0
+                conflict_count += 1
+                continue
 
+            if conflict is not None:
+                total_conflict += float(conflict)
+                conflict_count += 1
+
+            score_map = pignistic_scores(fused, class_labels)
+            decision_scores = np.array([score_map[label] for label in class_labels], dtype=float)
+            score_sum = float(decision_scores.sum())
+            if score_sum > 1e-15:
+                decision_scores = decision_scores / score_sum
+            else:
+                decision_scores = _average_singleton_scores_from_bbas(sample_bbas, class_labels)
+
+            fused_scores.append(decision_scores)
+            predicted_label = class_labels[int(np.argmax(decision_scores))]
             if predicted_label not in label_lookup:
                 raise HTTPException(status_code=500, detail=f"Unknown fused label '{predicted_label}'.")
             y_pred.append(label_lookup[predicted_label])
@@ -1000,6 +976,8 @@ def iter_fusion_search_entries(
         for subset_idx in combinations(indices, r):
             subset_list = list(subset_idx)
             for fm in FUSION_METHODS_SEARCH:
+                if fm == "pcr5" and len(subset_list) != 2:
+                    continue
                 fused_metrics, _y_pred = _run_fusion_on_bbas(
                     bbas_per_sample,
                     subset_list,

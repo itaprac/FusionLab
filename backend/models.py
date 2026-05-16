@@ -36,6 +36,7 @@ class Methods(BaseModel):
     id: str
     name:str
     description: str
+    category: str = "other"
 
 class GetMethodsResponse(BaseModel):
     methods: List[Methods]

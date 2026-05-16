@@ -23,6 +23,26 @@ function defaultsFromSchema(schema) {
   return o
 }
 
+async function readJsonResponse(response, fallbackMessage) {
+  const text = await response.text()
+  if (!text) return {}
+  try {
+    return JSON.parse(text)
+  } catch {
+    if (!response.ok) throw new Error(text || fallbackMessage)
+    throw new Error(fallbackMessage)
+  }
+}
+
+function responseErrorMessage(data, fallbackMessage) {
+  const detail = data?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail.map((item) => (typeof item === 'string' ? item : item?.msg || JSON.stringify(item))).join(' ')
+  }
+  return fallbackMessage
+}
+
 function MethodParamInput({ spec, values, onChange }) {
   const compact = 'input max-w-[6.5rem] py-1.5 px-2 text-xs'
   const compactWide = 'input max-w-[9rem] py-1.5 px-2 text-xs'
@@ -532,8 +552,8 @@ function MLPipeline() {
           }),
         })
       }
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.detail || t('ml.err.generic'))
+      const d = await readJsonResponse(r, t('ml.err.generic'))
+      if (!r.ok) throw new Error(responseErrorMessage(d, t('ml.err.generic')))
       const nextContext = {
         datasetName: getDatasetLabel(selectedDataset),
         fusionMethodName: getMethodLabel(selectedMethod),
@@ -723,8 +743,8 @@ function MLPipeline() {
           }),
         })
       }
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.detail || t('ml.err.generic'))
+      const d = await readJsonResponse(r, t('ml.err.generic'))
+      if (!r.ok) throw new Error(responseErrorMessage(d, t('ml.err.generic')))
       setExportedCode(d.code || '')
       setExportFilename(d.filename || '')
       setExportDatasetKind(d.datasetKind || (isCustom ? 'uploaded' : 'builtin'))
@@ -971,7 +991,7 @@ function MLPipeline() {
           <span className="mono flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold" style={{ background: 'var(--accent-soft)', color: 'var(--accent-strong)' }}>3</span>
           <p className="label" style={{ margin: 0 }}>{t('ml.step3')}</p>
         </div>
-        <MethodSelector methods={methods} selected={selectedMethod} onChange={setSelectedMethod} />
+        <MethodSelector methods={methods} selected={selectedMethod} onChange={setSelectedMethod} context="ml" />
       </section>
 
       <section className="border-t pt-6" style={{ borderColor: 'var(--line)' }}>

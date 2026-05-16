@@ -1,6 +1,120 @@
 import { useMemo } from 'react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { useLanguage } from '../contexts/LanguageContext'
+
+function splitProposition(raw) {
+  const value = String(raw ?? '')
+  if (value === 'empty') {
+    return { kind: 'empty', display: '∅', detailKey: 'result.proposition.empty', full: '∅', parts: ['∅'], operator: null }
+  }
+  const unionParts = value.split('|').map(part => part.trim()).filter(Boolean)
+  if (unionParts.length > 1) {
+    return {
+      kind: 'union',
+      display: unionParts.join(' ∪ '),
+      detailKey: 'result.proposition.union',
+      full: unionParts.join(' ∪ '),
+      parts: unionParts,
+      operator: '∪',
+    }
+  }
+  const intersectionParts = value.split('&').map(part => part.trim()).filter(Boolean)
+  if (intersectionParts.length > 1) {
+    return {
+      kind: 'intersection',
+      display: intersectionParts.join(' ∩ '),
+      detailKey: 'result.proposition.intersection',
+      full: intersectionParts.join(' ∩ '),
+      parts: intersectionParts,
+      operator: '∩',
+    }
+  }
+  return { kind: 'singleton', display: value, detailKey: 'result.proposition.singleton', full: value, parts: [value], operator: null }
+}
+
+function wrapAxisText(value, maxChars = 28) {
+  const parsed = splitProposition(value)
+  if (parsed.kind === 'empty') return ['∅']
+
+  const out = []
+  parsed.parts.forEach((part, idx) => {
+    const words = part.split(/\s+/).filter(Boolean)
+    let line = idx > 0 && parsed.operator ? `${parsed.operator} ` : ''
+    words.forEach(word => {
+      const next = line ? `${line} ${word}` : word
+      if (next.length > maxChars && line.trim()) {
+        out.push(line)
+        line = word
+      } else {
+        line = next
+      }
+    })
+    if (line.trim()) out.push(line)
+  })
+  return out.length ? out : [parsed.display]
+}
+
+function AxisTick({ x, y, payload, tickColor }) {
+  const lines = wrapAxisText(payload.value)
+  const startY = y - ((lines.length - 1) * 6)
+  return (
+    <g transform={`translate(${x},${startY})`}>
+      {lines.map((line, index) => (
+        <text
+          key={`${line}-${index}`}
+          x={0}
+          y={index * 13}
+          textAnchor="end"
+          dominantBaseline="central"
+          fill={tickColor}
+          fontSize={11}
+        >
+          {line}
+        </text>
+      ))}
+    </g>
+  )
+}
+
+function PropositionLabel({ value, compact = false }) {
+  const { t } = useLanguage()
+  const parsed = splitProposition(value)
+  const isEmpty = parsed.kind === 'empty'
+  const isCompound = parsed.parts.length > 1
+  return (
+    <span className={`inline-flex min-w-0 ${compact ? 'items-center gap-1.5' : 'flex-col gap-1'}`}>
+      {isCompound ? (
+        <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 leading-snug">
+          {parsed.parts.map((part, idx) => (
+            <span key={`${part}-${idx}`} className="inline-flex min-w-0 items-center gap-2">
+              {idx > 0 && (
+                <span
+                  className="inline-flex items-center justify-center text-base font-bold leading-none"
+                  style={{ color: 'var(--accent-strong)', transform: 'translateY(-0.08em)' }}
+                >
+                  {parsed.operator}
+                </span>
+              )}
+              <span className="break-words">{part}</span>
+            </span>
+          ))}
+        </span>
+      ) : (
+        <span
+          className={isEmpty ? 'inline-flex items-center text-base font-bold' : 'break-words'}
+          style={isEmpty ? { color: 'var(--danger)' } : undefined}
+        >
+          {parsed.display}
+        </span>
+      )}
+      {!compact && (
+        <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+          {t(parsed.detailKey)}
+        </span>
+      )}
+    </span>
+  )
+}
 
 function parseSourceMasses(source) {
   if (!source || !Array.isArray(source.hypotheses)) return {}
@@ -60,11 +174,16 @@ function ResultCard({ result, methodId, methodName, darkMode, displayOrder, conf
     return [...ordered, ...entries.filter(([k]) => !used.has(k)).sort((a, b) => b[1] - a[1])]
   })()
 
-  const chartData = sortedMasses.map(([name, m]) => ({
-    name: String(name).length > 24 ? `${String(name).slice(0, 22)}…` : String(name),
-    fullName: String(name),
-    massPct: Number(m) * 100,
-  }))
+  const chartData = sortedMasses.map(([name, m]) => {
+    const parsed = splitProposition(name)
+    return {
+      name: parsed.display,
+      fullName: parsed.full,
+      kind: parsed.kind,
+      massPct: Number(m) * 100,
+    }
+  })
+  const chartHeight = Math.max(224, chartData.reduce((sum, item) => sum + Math.max(32, wrapAxisText(item.name).length * 16), 56))
 
   const winner = [...sortedMasses].sort((a, b) => b[1] - a[1])[0]
   const conflict = result.conflict !== null && result.conflict !== undefined && !Number.isNaN(Number(result.conflict))
@@ -131,12 +250,14 @@ function ResultCard({ result, methodId, methodName, darkMode, displayOrder, conf
         </div>
 
         {winner && (
-          <div className="flex items-baseline justify-between gap-4 border-b px-4 py-4" style={{ borderColor: 'var(--line)' }}>
-            <div>
+          <div className="flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-start sm:justify-between" style={{ borderColor: 'var(--line)' }}>
+            <div className="min-w-0 flex-1">
               <p className="text-[10px] font-semibold uppercase tracking-[0.15em]" style={{ color: 'var(--text-muted)' }}>{t('result.dominant')}</p>
-              <p className="mt-0.5 text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>{winner[0]}</p>
+              <p className="mt-1 text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>
+                <PropositionLabel value={winner[0]} />
+              </p>
             </div>
-            <div className="text-right">
+            <div className="shrink-0 text-left sm:text-right">
               <span className="mono text-2xl font-bold tracking-tight" style={{ color: 'var(--accent-strong)' }}>
                 {(winner[1] * 100).toFixed(1)}
               </span>
@@ -147,11 +268,17 @@ function ResultCard({ result, methodId, methodName, darkMode, displayOrder, conf
 
         <div className="px-4 py-4">
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: 'var(--text-muted)' }}>{t('result.chart.title')}</p>
-          <div className="h-56 w-full">
+          <div className="w-full" style={{ height: chartHeight }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
                 <XAxis type="number" domain={[0, 100]} tickFormatter={v => `${v}%`} tick={{ fill: tickColor, fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" width={120} tick={{ fill: tickColor, fontSize: 11 }} />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  width={220}
+                  interval={0}
+                  tick={(props) => <AxisTick {...props} tickColor={tickColor} />}
+                />
                 <Tooltip
                   formatter={(value, _n, props) => [`${Number(value).toFixed(1)}%`, props.payload?.fullName || 'mass']}
                   contentStyle={{
@@ -161,10 +288,23 @@ function ResultCard({ result, methodId, methodName, darkMode, displayOrder, conf
                     fontSize: 12,
                   }}
                 />
-                <Bar dataKey="massPct" fill="var(--accent)" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="massPct" radius={[0, 4, 4, 0]}>
+                  {chartData.map((entry, idx) => (
+                    <Cell
+                      key={`${entry.fullName}-${idx}`}
+                      fill={entry.kind === 'empty' ? 'var(--danger)' : entry.kind === 'union' ? 'oklch(58% 0.12 170)' : 'var(--accent)'}
+                    />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
+          {sortedMasses.some(([name]) => splitProposition(name).kind === 'empty') && (
+            <p className="mt-3 text-xs leading-5" style={{ color: 'var(--text-muted)' }}>
+              <span className="font-semibold" style={{ color: 'var(--danger)' }}>∅</span>{' '}
+              {t('result.empty.explain')}
+            </p>
+          )}
         </div>
 
         {showPairs && (
