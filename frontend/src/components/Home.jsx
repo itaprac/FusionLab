@@ -133,7 +133,7 @@ function Home() {
               >
                 {idx < 3 && (
                   <div
-                    className="absolute -right-3 top-1/2 z-10 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border sm:flex"
+                    className="absolute -right-5 top-1/2 z-10 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border sm:flex"
                     style={{ borderColor: 'var(--line-strong)', background: 'var(--bg-sunken)' }}
                   >
                     <svg className="w-3 h-3" style={{ color: 'var(--text-muted)' }} fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
