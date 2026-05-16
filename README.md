@@ -3,74 +3,45 @@
 [![CI](https://github.com/itaprac/FusionLab/actions/workflows/ci.yml/badge.svg)](https://github.com/itaprac/FusionLab/actions/workflows/ci.yml)
 [![Railway Deploy](https://github.com/itaprac/FusionLab/actions/workflows/railway-deploy.yml/badge.svg)](https://github.com/itaprac/FusionLab/actions/workflows/railway-deploy.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Python 3.13+](https://img.shields.io/badge/Python-3.13%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=111)](https://react.dev/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.128%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-
-[Features](#features) · [Getting Started](#getting-started) · [Railway Deployment](#railway-deployment) · [API Overview](#api-overview) · [License](#license)
 
 > **Interactive platform for Dempster-Shafer evidence fusion and ML classifier ensemble analysis.**
 
 Fusion Lab is a full-stack web application that implements the **Dempster-Shafer theory of evidence** and **Proportional Conflict Redistribution (PCR5, PCR6)** rules for combining uncertain information from multiple sources. Beyond the core fusion calculator, it provides a complete **machine learning pipeline** that trains multiple classifiers, converts their probability outputs into belief mass functions (BBAs), and fuses predictions to evaluate whether evidence-theoretic combination improves classification accuracy over individual models or majority voting.
 
----
+## Table of Contents
+
+- [Features](#features)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Backend](#backend)
+  - [Frontend](#frontend)
+- [Railway Deployment](#railway-deployment)
+- [API Overview](#api-overview)
+- [Fusion Methods](#fusion-methods)
+- [Project Structure](#project-structure)
+- [License](#license)
 
 ## Features
 
 ### Fusion Calculator
-- **Multiple fusion rules**: Dempster's rule, PCR5, PCR6, Yager's rule, Dubois-Prade, disjunctive consensus, and more
-- **Interactive source management**: Add any number of sources with custom hypotheses and belief mass assignments
-- **Conflict analysis**: View the conflict coefficient between sources
-- **Pignistic transformation**: Get decision-ready probability scores from fused belief masses
-- **Pre-built examples**: Load ready-to-use scenarios (low conflict, high conflict, real-world use cases like avalanche hazard assessment)
-- **Code export**: Generate standalone Python scripts for any fusion calculation
+- **Multiple fusion rules** — Dempster's rule, PCR5, PCR6, Yager's rule, Dubois-Prade, disjunctive consensus, and more
+- **Interactive source management** — Add any number of sources with custom hypotheses and belief mass assignments
+- **Conflict analysis** — View the conflict coefficient between sources
+- **Pignistic transformation** — Get decision-ready probability scores from fused belief masses
+- **Pre-built examples** — Load ready-to-use scenarios (low conflict, high conflict, real-world use cases like avalanche hazard assessment)
+- **Code export** — Generate standalone Python scripts for any fusion calculation
 
 ### ML Fusion Pipeline
-- **Built-in datasets**: Iris, Heart Disease, and more
-- **Custom dataset upload**: Import your own CSV files with automatic column type detection
-- **Multiple classifiers**: Logistic Regression, Random Forest, SVM, KNN, Naive Bayes, Gradient Boosting, and others with configurable hyperparameters
-- **Evaluation modes**: Holdout split (75/25) or k-fold cross-validation
-- **Fusion vs baseline comparison**: See how fused predictions compare against each individual model and majority voting
-- **Sample-level analysis**: Inspect exactly which test samples were correctly/incorrectly classified by fusion vs best model, including "rescue" cases where all individual models were wrong but fusion was correct
-- **Combination search**: Automatically evaluate all model subsets (≥2) × fusion rules to find the optimal combination
-- **Streaming progress**: Real-time NDJSON progress updates during search
-- **Confusion matrix**: Visualize fusion classification performance
-- **Code export**: Generate reproducible Python notebooks for any ML fusion experiment
-
----
-
-## Architecture
-
-```
-Fusion Lab
-├── Backend (Python / FastAPI)
-│   ├── evidencelib — Dempster-Shafer & PCR fusion engine
-│   ├── belief_adapter.py — BBA construction, combination, pignistic scoring
-│   ├── ml_runtime.py — Dataset loading, classifier training, preprocessing
-│   ├── ml_export.py — Python code generation for reproducibility
-│   └── models.py — Pydantic request/response schemas
-│
-└── Frontend (React / Vite)
-    ├── Calculator — Interactive belief mass fusion
-    ├── ML Pipeline — Dataset upload, model selection, fusion evaluation
-    ├── History — Experiment log (localStorage)
-    ├── Docs — Theory documentation
-    └── i18n — English / Polish localization
-```
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| **Backend** | Python 3.13+, FastAPI, Uvicorn |
-| **Math** | evidencelib, NumPy, scikit-learn, SciPy |
-| **Frontend** | React 18, Vite, React Router, Recharts |
-| **Styling** | Tailwind CSS, CSS custom properties (dark mode) |
-| **Video** | Remotion (intro animation) |
-
----
+- **Built-in datasets** — Iris, Heart Disease, and more
+- **Custom dataset upload** — Import your own CSV files with automatic column type detection
+- **Multiple classifiers** — Logistic Regression, Random Forest, SVM, KNN, Naive Bayes, Gradient Boosting, and others with configurable hyperparameters
+- **Evaluation modes** — Holdout split (75/25) or k-fold cross-validation
+- **Fusion vs baseline comparison** — See how fused predictions compare against each individual model and majority voting
+- **Sample-level analysis** — Inspect exactly which test samples were correctly/incorrectly classified by fusion vs best model, including "rescue" cases where all individual models were wrong but fusion was correct
+- **Combination search** — Automatically evaluate all model subsets (≥2) × fusion rules to find the optimal combination
+- **Streaming progress** — Real-time NDJSON progress updates during search
+- **Confusion matrix** — Visualize fusion classification performance
+- **Code export** — Generate reproducible Python notebooks for any ML fusion experiment
 
 ## Getting Started
 
@@ -101,8 +72,6 @@ npm run dev
 
 The application opens at `http://localhost:5173`.
 
----
-
 ## Railway Deployment
 
 Fusion Lab can run on Railway as one Dockerized service: the Vite frontend is built into static assets, FastAPI serves those assets, and browser API calls use the `/api/*` prefix on the same domain.
@@ -127,8 +96,6 @@ The [`Railway Deploy`](./.github/workflows/railway-deploy.yml) workflow is manua
 | `RAILWAY_SERVICE` | No | Service name if the project has more than one service |
 
 The regular [`CI`](./.github/workflows/ci.yml) workflow checks the backend, builds the frontend, and builds the Railway Docker image.
-
----
 
 ## API Overview
 
@@ -156,8 +123,6 @@ The regular [`CI`](./.github/workflows/ci.yml) workflow checks the backend, buil
 | `POST` | `/ml/export-code` | Generate Python code for a built-in dataset experiment |
 | `POST` | `/ml/export-code-upload` | Generate Python code for an uploaded dataset experiment |
 
----
-
 ## Fusion Methods
 
 | Rule | Category | Description |
@@ -170,8 +135,6 @@ The regular [`CI`](./.github/workflows/ci.yml) workflow checks the backend, buil
 | **Disjunctive** | Disjunctive | Full disjunctive combination |
 | **Average** | Other | Simple arithmetic mean of belief masses |
 | **Minimum** | Conjunctive | Conjunctive consensus (minimum operator) |
-
----
 
 ## Project Structure
 
@@ -198,8 +161,6 @@ FusionLab/
 │
 └── README.md                # This file
 ```
-
----
 
 ## License
 
