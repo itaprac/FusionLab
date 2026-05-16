@@ -91,7 +91,7 @@ The [`Railway Deploy`](./.github/workflows/railway-deploy.yml) workflow is manua
 
 | Secret | Required | Description |
 |--------|----------|-------------|
-| `RAILWAY_TOKEN` | Yes | Railway account/project token used by the CLI |
+| `RAILWAY_API_TOKEN` | Yes | Railway account/project token used by the CLI |
 | `RAILWAY_PROJECT_ID` | Yes | Railway project ID to deploy into |
 | `RAILWAY_SERVICE` | No | Service name if the project has more than one service |
 
@@ -147,11 +147,10 @@ FusionLab/
 │   ├── ml_runtime.py        # ML dataset & classifier management
 │   ├── ml_export.py         # Python code generation
 │   ├── pyproject.toml       # Python dependencies
-│   └── README.md            # Backend-specific documentation
+│   └── uv.lock              # Locked backend dependencies
 │
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/           # Calculator, MLPipeline, History, Docs
 │   │   ├── components/      # Reusable UI components
 │   │   ├── locales/         # i18n translations (en, pl)
 │   │   ├── remotion/        # Intro animation

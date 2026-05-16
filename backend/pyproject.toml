@@ -1,8 +1,7 @@
 [project]
 name = "backend-dempster"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "FastAPI backend for Fusion Lab evidence-fusion workflows"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.128.0",
