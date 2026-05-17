@@ -30,6 +30,9 @@ coverage/
 .claude/
 .codex/
 
+# Local tool state
+.clawpatch/
+
 
 # Mac OS
 .DS_Store
