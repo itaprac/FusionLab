@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/itaprac/FusionLab/actions/workflows/ci.yml/badge.svg)](https://github.com/itaprac/FusionLab/actions/workflows/ci.yml)
 [![Railway Deploy](https://github.com/itaprac/FusionLab/actions/workflows/railway-deploy.yml/badge.svg)](https://github.com/itaprac/FusionLab/actions/workflows/railway-deploy.yml)
+[![Website](https://img.shields.io/badge/Website-fusionlab--production.up.railway.app-blue)](https://fusionlab-production.up.railway.app)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 > **Interactive platform for Dempster-Shafer evidence fusion and ML classifier ensemble analysis.**
