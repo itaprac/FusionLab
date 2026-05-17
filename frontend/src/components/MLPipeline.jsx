@@ -1219,16 +1219,17 @@ function MLPipeline() {
               </div>
             </div>
 
+            <div className="mb-6 flex items-center gap-4">
+              <button type="button" onClick={exportCode} disabled={exportLoading || loading} className="btn btn-secondary text-xs">
+                {exportLoading ? t('ml.export.loading') : t('ml.export.button')}
+              </button>
+            </div>
+
             <div className="flex items-center justify-between gap-3 mb-4">
               <p className="label">{t('ml.detail.title')}</p>
-              <div className="flex items-center gap-3">
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {resultContext?.datasetName || getDatasetLabel(selectedDataset)} · {resultContext?.fusionMethodName || getMethodLabel(selectedMethod)}
-                </p>
-                <button type="button" onClick={exportCode} disabled={exportLoading || loading} className="btn btn-secondary text-xs">
-                  {exportLoading ? t('ml.export.loading') : t('ml.export.button')}
-                </button>
-              </div>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {resultContext?.datasetName || getDatasetLabel(selectedDataset)} · {resultContext?.fusionMethodName || getMethodLabel(selectedMethod)}
+              </p>
             </div>
 
             <div className="overflow-x-auto rounded-xl border" style={{ borderColor: 'var(--line)' }}>
