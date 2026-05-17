@@ -9,11 +9,28 @@ import ExampleCalculator from './components/ExampleCalculator'
 import ExampleMLFusion from './components/ExampleMLFusion'
 import Docs from './components/Docs'
 
-function AppLayout() {
-  const [darkMode, setDarkMode] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('darkMode') === 'true'
+function readStoredDarkMode() {
+  if (typeof window === 'undefined') return false
+
+  try {
+    return window.localStorage.getItem('darkMode') === 'true'
+  } catch {
     return false
-  })
+  }
+}
+
+function writeStoredDarkMode(value) {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem('darkMode', String(value))
+  } catch {
+    // Ignore storage failures so theme preference never breaks rendering.
+  }
+}
+
+function AppLayout() {
+  const [darkMode, setDarkMode] = useState(readStoredDarkMode)
   const location = useLocation()
   const mainRef = useRef(null)
   const prevPath = useRef(location.pathname)
@@ -21,7 +38,7 @@ function AppLayout() {
   useEffect(() => {
     if (darkMode) document.documentElement.classList.add('dark')
     else document.documentElement.classList.remove('dark')
-    localStorage.setItem('darkMode', darkMode)
+    writeStoredDarkMode(darkMode)
   }, [darkMode])
 
   useEffect(() => {
